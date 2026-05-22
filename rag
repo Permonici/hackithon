@@ -424,29 +424,13 @@
 </head>
 
 <body>
-
-  <div class="layout">
-    <div class="sidebar">
-      <div class="sidebar-header">
-        <h2>Znalostní databáze</h2>
-        <p id="kb-count">0 položek · vektorová DB</p>
-      </div>
-      <div class="kb-section" id="kb-list"></div>
-      <div class="add-entry">
-        <div class="kb-section-title">Přidat nový záznam</div>
-        <textarea id="new-q" rows="2" placeholder="Dotaz zákazníka..."></textarea>
-        <textarea id="new-a" rows="2" placeholder="Správná odpověď..."></textarea>
-        <button class="btn-add" onclick="addKbEntry()">+ Přidat do databáze</button>
-      </div>
-    </div>
-
     <div class="main">
       <div class="top-bar">
         <div class="agent-info">
           <div class="agent-avatar">🤖</div>
           <div>
-            <div class="agent-name"><span class="status-dot"></span>RAG Support Operator</div>
-            <div class="agent-sub">Claude Sonnet · cosine similarity · aktivní</div>
+            <div class="agent-name"><span class="status-dot"></span>AI Operator</div>
+            <div class="agent-sub">AI operátor zákaznické podpory · aktivní</div>
           </div>
         </div>
         <div class="stats-bar">
@@ -465,15 +449,10 @@
         </div>
       </div>
 
-      <div class="tab-bar">
-        <div class="tab active" onclick="switchTab('chat', this)">Chat</div>
-        <div class="tab" onclick="switchTab('json', this)">JSON log</div>
-      </div>
-
       <div class="chat-area" id="chat-area">
         <div class="msg agent">
           <div class="bubble agent">Dobrý den! Jsem váš AI operátor zákaznické podpory. Jak vám mohu pomoci? 😊</div>
-          <div class="meta">RAG Operator · právě teď</div>
+          <div class="meta">AI Operator · právě teď</div>
         </div>
       </div>
 
@@ -483,7 +462,7 @@
       </div>
 
       <div class="input-bar">
-        <textarea id="user-input" rows="1" placeholder="Napište dotaz zákazníka..."
+        <textarea id="user-input" rows="2" placeholder="Napište dotaz zákazníka..."
           onkeydown="handleKey(event)"></textarea>
         <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
       </div>
