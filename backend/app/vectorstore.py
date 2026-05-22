@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib
+import uuid
 from collections import Counter
 from typing import Any
 
@@ -197,7 +197,7 @@ def qdrant_collection_exists(settings: Settings) -> bool:
 
 
 def _stable_id(value: str) -> str:
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, value))
 
 
 def _short_summary(text: str) -> str:

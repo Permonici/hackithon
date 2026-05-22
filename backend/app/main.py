@@ -44,7 +44,13 @@ def stats() -> StatsResponse:
 def ingest() -> IngestResponse:
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="Chybí OPENAI_API_KEY pro vytvoření embeddingů.")
-    return ingest_transcripts(settings, recreate=True)
+    try:
+        return ingest_transcripts(settings, recreate=True)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Indexace se nepodařila: {exc}",
+        ) from exc
 
 
 @app.post(f"{settings.api_prefix}/chat", response_model=ChatResponse)

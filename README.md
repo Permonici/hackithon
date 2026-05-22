@@ -50,6 +50,28 @@ http://localhost:8080
 
 6. V aplikaci klikněte na `Indexovat data`. Tím se vytvoří Qdrant index z transkripcí.
 
+## Jak postupovat ve frontendu
+
+1. Otevřete `http://localhost:8080`.
+2. Nahoře zkontrolujte stav:
+   - `OpenAI připraveno` znamená, že backend vidí API klíč.
+   - `Index prázdný` znamená, že ještě není nahraná znalostní báze.
+3. Klikněte na `Indexovat`.
+4. Počkejte, dokud se stav nezmění na počet chunků. Během indexace stránku neobnovujte.
+5. Vyberte ukázkový dotaz nebo napište vlastní.
+6. Klikněte na `Zeptat se asistenta`.
+7. Sledujte:
+   - průběh agenta vpravo,
+   - sílu zdroje v metrikách,
+   - konkrétní úryvky transkripcí dole.
+
+Pokud indexace po předchozí chybě zůstane v divném stavu, vyčistěte Qdrant volume a spusťte aplikaci znovu:
+
+```powershell
+docker compose down -v
+docker compose up --build
+```
+
 ## Užitečné příkazy
 
 Spuštění produkčního dema:

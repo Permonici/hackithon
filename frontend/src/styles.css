@@ -29,6 +29,10 @@ body {
     @apply rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm leading-5 text-slate-600 transition hover:border-mint hover:bg-mint/5 hover:text-ink;
   }
 
+  .sample-chip {
+    @apply rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-xs leading-5 text-slate-600 transition hover:border-mint hover:bg-mint/5 hover:text-ink;
+  }
+
   .status-pill {
     @apply inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium;
   }
@@ -39,5 +43,13 @@ body {
 
   .highlight-item {
     @apply flex items-center gap-2 rounded-md bg-slate-50 px-3 py-2;
+  }
+
+  .success-banner {
+    @apply flex items-center gap-2 rounded-md border border-mint/30 bg-mint/10 px-4 py-3 text-sm font-medium text-mint;
+  }
+
+  .warning-banner {
+    @apply flex items-center gap-2 rounded-md border border-amber/30 bg-amber/10 px-4 py-3 text-sm font-medium text-amber;
   }
 }
