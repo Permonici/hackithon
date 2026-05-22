@@ -17,12 +17,24 @@ body {
     @apply rounded-md border border-slate-200 bg-white p-5 shadow-panel;
   }
 
+  .tab-button {
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:border-mint hover:text-mint;
+  }
+
+  .tab-button-active {
+    @apply border-ink bg-ink text-white hover:border-ink hover:text-white;
+  }
+
   .primary-button {
     @apply inline-flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60;
   }
 
   .icon-button {
-    @apply inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-mint hover:text-mint;
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-mint hover:text-mint disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .field-input {
+    @apply w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20;
   }
 
   .sample-button {
@@ -35,6 +47,34 @@ body {
 
   .status-pill {
     @apply inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium;
+  }
+
+  .chat-bubble {
+    @apply max-w-[88%] rounded-md px-4 py-3 shadow-sm md:max-w-[76%];
+  }
+
+  .chat-bubble-user {
+    @apply bg-ink text-white;
+  }
+
+  .chat-bubble-assistant {
+    @apply border border-slate-200 bg-slate-50 text-slate-700;
+  }
+
+  .mode-button {
+    @apply flex min-h-16 flex-col items-center justify-center rounded-md border border-slate-200 bg-white px-2 py-2 text-center text-sm font-semibold text-slate-600 transition hover:border-mint hover:text-mint;
+  }
+
+  .mode-button small {
+    @apply mt-1 text-[11px] font-normal text-slate-400;
+  }
+
+  .mode-button-active {
+    @apply border-mint bg-mint/10 text-mint;
+  }
+
+  .metric-card {
+    @apply rounded-md border border-slate-200 bg-white p-3;
   }
 
   .answer-box {
@@ -51,5 +91,19 @@ body {
 
   .warning-banner {
     @apply flex items-center gap-2 rounded-md border border-amber/30 bg-amber/10 px-4 py-3 text-sm font-medium text-amber;
+  }
+
+  .thin-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+
+  .thin-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 999px;
   }
 }

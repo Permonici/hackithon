@@ -14,7 +14,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from xdent_assistant.ingest import build_chunks
 from xdent_assistant.retrieval import source_label
 from xdent_assistant.text import best_sentences
-from xdent_assistant.topics import classify_topic, label_for
+from xdent_assistant.topics import TOPICS, classify_topic, label_for
 
 from .config import Settings
 from .schemas import IngestResponse, Source, StatsResponse
@@ -108,26 +108,29 @@ def search_sources(
     *,
     top_k: int,
     topic_hint: str | None,
+    tolerance: str = "balanced",
 ) -> list[Source]:
     store = build_vector_store(settings)
-    filter_kwargs = None
-    if topic_hint:
-        filter_kwargs = qdrant_models.Filter(
-            must=[
-                qdrant_models.FieldCondition(
-                    key="metadata.topic",
-                    match=qdrant_models.MatchValue(value=topic_hint),
-                )
-            ]
+    effective_k = _effective_k(top_k, tolerance)
+    topic_filter = _topic_filter(topic_hint) if topic_hint else None
+    docs_with_scores: list[tuple[Document, float]] = []
+
+    for search_query in _query_variants(query, topic_hint, tolerance):
+        docs_with_scores.extend(
+            store.similarity_search_with_score(
+                search_query,
+                k=effective_k,
+                filter=topic_filter,
+            )
         )
 
-    docs_with_scores = store.similarity_search_with_score(
-        query,
-        k=top_k,
-        filter=filter_kwargs,
-    )
+    if topic_hint and tolerance in {"balanced", "broad"}:
+        docs_with_scores.extend(store.similarity_search_with_score(query, k=effective_k))
+
     if not docs_with_scores and topic_hint:
-        docs_with_scores = store.similarity_search_with_score(query, k=top_k)
+        docs_with_scores = store.similarity_search_with_score(query, k=effective_k)
+
+    docs_with_scores = _dedupe_and_rank(docs_with_scores, limit=top_k, topic_hint=topic_hint)
 
     sources: list[Source] = []
     for doc, score in docs_with_scores:
@@ -144,6 +147,60 @@ def search_sources(
             )
         )
     return sources
+
+
+def _effective_k(top_k: int, tolerance: str) -> int:
+    if tolerance == "broad":
+        return min(18, max(top_k * 3, 10))
+    if tolerance == "balanced":
+        return min(14, max(top_k * 2, 8))
+    return top_k
+
+
+def _topic_filter(topic_hint: str | None) -> qdrant_models.Filter | None:
+    if not topic_hint:
+        return None
+    return qdrant_models.Filter(
+        must=[
+            qdrant_models.FieldCondition(
+                key="metadata.topic",
+                match=qdrant_models.MatchValue(value=topic_hint),
+            )
+        ]
+    )
+
+
+def _query_variants(query: str, topic_hint: str | None, tolerance: str) -> list[str]:
+    if not topic_hint or tolerance == "strict":
+        return [query]
+
+    keywords = sorted(TOPICS.get(topic_hint, {}).get("keywords", []))
+    label = label_for(topic_hint)
+    if tolerance == "broad":
+        return [
+            query,
+            f"{label}. {query}. {' '.join(keywords[:10])}",
+        ]
+
+    return [f"{query}. {label}. {' '.join(keywords[:5])}"]
+
+
+def _dedupe_and_rank(
+    docs_with_scores: list[tuple[Document, float]],
+    *,
+    limit: int,
+    topic_hint: str | None,
+) -> list[tuple[Document, float]]:
+    best_by_chunk: dict[str, tuple[Document, float, float]] = {}
+    for doc, score in docs_with_scores:
+        metadata = doc.metadata
+        key = str(metadata.get("chunk_id") or metadata.get("source") or doc.page_content[:80])
+        adjusted_score = score + (0.2 if topic_hint and metadata.get("topic") == topic_hint else 0.0)
+        previous = best_by_chunk.get(key)
+        if previous is None or adjusted_score > previous[2]:
+            best_by_chunk[key] = (doc, score, adjusted_score)
+    ranked = sorted(best_by_chunk.values(), key=lambda item: item[2], reverse=True)[:limit]
+    return [(doc, score) for doc, score, _ in ranked]
 
 
 def get_stats(settings: Settings) -> StatsResponse:

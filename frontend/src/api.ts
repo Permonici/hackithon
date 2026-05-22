@@ -1,4 +1,4 @@
-import type { AgentStep, ChatResponse, StatsResponse } from "./types";
+import type { AgentStep, ChatRequestPayload, ChatResponse, PriceInfoResponse, StatsResponse } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -10,35 +10,27 @@ export async function fetchStats(): Promise<StatsResponse> {
   return response.json();
 }
 
-export async function sendChat(message: string, strictMode: boolean): Promise<ChatResponse> {
-  const response = await fetch(`${API_URL}/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, strict_mode: strictMode, top_k: 6 })
-  });
-
+export async function fetchPricing(): Promise<PriceInfoResponse> {
+  const response = await fetch(`${API_URL}/pricing`);
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || "Backend nevrátil odpověď.");
+    throw new Error("Ceník se nepodařilo načíst.");
   }
-
   return response.json();
 }
 
 export async function sendChatStream(
-  message: string,
-  strictMode: boolean,
+  payload: ChatRequestPayload,
   onStep: (step: AgentStep) => void
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, strict_mode: strictMode, top_k: 6 })
+    body: JSON.stringify(payload)
   });
 
   if (!response.ok || !response.body) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || "Stream se nepodařilo spustit.");
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Stream se nepodařilo spustit.");
   }
 
   const reader = response.body.getReader();
@@ -52,8 +44,9 @@ export async function sendChatStream(
     buffer += decoder.decode(value, { stream: true });
     const events = buffer.split("\n\n");
     buffer = events.pop() ?? "";
-    for (const event of events) {
-      const parsed = parseSse(event);
+
+    for (const rawEvent of events) {
+      const parsed = parseSse(rawEvent);
       if (!parsed) continue;
       if (parsed.event === "step") {
         onStep(parsed.data as AgentStep);
@@ -62,8 +55,8 @@ export async function sendChatStream(
         finalResponse = parsed.data as ChatResponse;
       }
       if (parsed.event === "error") {
-        const payload = parsed.data as { message?: string; detail?: string };
-        throw new Error(payload.message || payload.detail || "Backend při odpovědi vrátil chybu.");
+        const body = parsed.data as { message?: string; detail?: string };
+        throw new Error(body.message || body.detail || "Backend při odpovědi vrátil chybu.");
       }
     }
   }
@@ -77,8 +70,8 @@ export async function sendChatStream(
 export async function ingestData(): Promise<void> {
   const response = await fetch(`${API_URL}/ingest`, { method: "POST" });
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || "Indexaci se nepodařilo spustit.");
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Indexaci se nepodařilo spustit.");
   }
 }
 

@@ -6,6 +6,7 @@ FastAPI služba pro XDENT AI asistenta.
 
 - `GET /health` - kontrola služby
 - `GET /api/stats` - stav Qdrant indexu a pokrytí témat
+- `GET /api/pricing` - modely a orientační ceny z konfigurace
 - `POST /api/ingest` - načtení transkripcí, anotace chunků, embeddingy a zápis do Qdrantu
 - `POST /api/chat` - odpověď asistenta
 - `POST /api/evaluate` - evaluace nad sadou dotazů

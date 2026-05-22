@@ -9,7 +9,17 @@ from fastapi.responses import StreamingResponse
 
 from .agent import SupportAgent
 from .config import get_settings
-from .schemas import ChatRequest, ChatResponse, EvalRequest, EvalResponse, EvalResult, IngestResponse, StatsResponse
+from .pricing import resolve_price_info
+from .schemas import (
+    ChatRequest,
+    ChatResponse,
+    EvalRequest,
+    EvalResponse,
+    EvalResult,
+    IngestResponse,
+    PriceInfoResponse,
+    StatsResponse,
+)
 from .topics import topic_catalog
 from .vectorstore import get_stats, ingest_transcripts, qdrant_collection_exists
 
@@ -40,6 +50,11 @@ def stats() -> StatsResponse:
     return get_stats(settings)
 
 
+@app.get(f"{settings.api_prefix}/pricing", response_model=PriceInfoResponse)
+def pricing() -> PriceInfoResponse:
+    return resolve_price_info(settings)
+
+
 @app.post(f"{settings.api_prefix}/ingest", response_model=IngestResponse)
 def ingest() -> IngestResponse:
     if not settings.openai_api_key:
@@ -60,6 +75,9 @@ def chat(request: ChatRequest) -> ChatResponse:
         request.message,
         strict_mode=request.strict_mode,
         top_k=request.top_k,
+        retrieval_tolerance=request.retrieval_tolerance,
+        session_id=request.session_id,
+        user=request.user,
     )
 
 
@@ -84,6 +102,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
                 request.message,
                 strict_mode=request.strict_mode,
                 top_k=request.top_k,
+                retrieval_tolerance=request.retrieval_tolerance,
+                session_id=request.session_id,
+                user=request.user,
             )
         except Exception as exc:
             yield _sse(
@@ -119,7 +140,12 @@ def evaluate(request: EvalRequest) -> EvalResponse:
     results: list[EvalResult] = []
     matches = 0
     for scenario in request.scenarios:
-        response = agent.answer(scenario.question, strict_mode=request.strict_mode, top_k=settings.retrieval_top_k)
+        response = agent.answer(
+            scenario.question,
+            strict_mode=request.strict_mode,
+            top_k=settings.retrieval_top_k,
+            retrieval_tolerance="balanced",
+        )
         match = None
         if scenario.expected_topic:
             match = response.topic == scenario.expected_topic

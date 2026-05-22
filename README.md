@@ -13,6 +13,8 @@ AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení fu
 - Anotace chunků: téma, záměr, možné řešení, shrnutí, kvalita zdroje.
 - Zdroje odpovědi přímo z transkripcí.
 - Strict mode a bezpečný fallback.
+- Tolerantní režimy retrievalu: přesné, vyvážené a širší hledání v chuncích.
+- Chat history, uživatelský kontext a price info panel ve frontendu.
 - JSONL log interakcí pro vyhodnocení kvality.
 - Offline fallback skripty bez Dockeru a bez API klíče.
 
@@ -53,17 +55,13 @@ http://localhost:8080
 ## Jak postupovat ve frontendu
 
 1. Otevřete `http://localhost:8080`.
-2. Nahoře zkontrolujte stav:
-   - `OpenAI připraveno` znamená, že backend vidí API klíč.
-   - `Index prázdný` znamená, že ještě není nahraná znalostní báze.
-3. Klikněte na `Indexovat`.
-4. Počkejte, dokud se stav nezmění na počet chunků. Během indexace stránku neobnovujte.
-5. Vyberte ukázkový dotaz nebo napište vlastní.
-6. Klikněte na `Zeptat se asistenta`.
-7. Sledujte:
-   - průběh agenta vpravo,
-   - sílu zdroje v metrikách,
-   - konkrétní úryvky transkripcí dole.
+2. Pokud je index prázdný, klikněte na `Indexovat`.
+3. V záložce `Chat` doplňte volitelné údaje o uživateli, vyberte toleranci hledání a odešlete dotaz.
+4. V konverzaci sledujte odpověď, zdroje z transkripcí, téma a jistotu.
+5. Záložka `Historie` drží lokální chat history pro demo a zpětné vyhodnocení.
+6. Záložka `Cena` ukazuje orientační náklad poslední odpovědi i celé relace.
+
+Poznámka: pokud v `.env` změníte `OPENAI_CHAT_MODEL`, doplňte i odpovídající `OPENAI_CHAT_INPUT_PRICE_PER_1M` a `OPENAI_CHAT_OUTPUT_PRICE_PER_1M`. U neznámého modelu frontend cenu férově označí jako nedoplněnou.
 
 Pokud indexace po předchozí chybě zůstane v divném stavu, vyčistěte Qdrant volume a spusťte aplikaci znovu:
 
@@ -138,6 +136,7 @@ Detailní popis je v [ARCHITEKTURA.md](ARCHITEKTURA.md).
 
 - `GET /health` - kontrola backendu
 - `GET /api/stats` - statistiky indexu a témat
+- `GET /api/pricing` - konfigurace modelů a orientačních cen
 - `POST /api/ingest` - načtení a indexace transkripcí
 - `POST /api/chat` - chat odpověď
 - `POST /api/chat/stream` - stream pro realtime frontend
