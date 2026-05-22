@@ -20,12 +20,14 @@ export async function fetchPricing(): Promise<PriceInfoResponse> {
 
 export async function sendChatStream(
   payload: ChatRequestPayload,
-  onStep: (step: AgentStep) => void
+  onStep: (step: AgentStep) => void,
+  signal?: AbortSignal
 ): Promise<ChatResponse> {
   const response = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal
   });
 
   if (!response.ok || !response.body) {
@@ -76,11 +78,17 @@ export async function ingestData(): Promise<void> {
 }
 
 function parseSse(rawEvent: string): { event: string; data: unknown } | null {
-  const eventLine = rawEvent.split("\n").find((line) => line.startsWith("event:"));
-  const dataLine = rawEvent.split("\n").find((line) => line.startsWith("data:"));
+  const lines = rawEvent.split("\n");
+  const eventLine = lines.find((line) => line.startsWith("event:"));
+  const dataLine = lines.find((line) => line.startsWith("data:"));
   if (!eventLine || !dataLine) return null;
-  return {
-    event: eventLine.replace("event:", "").trim(),
-    data: JSON.parse(dataLine.replace("data:", "").trim())
-  };
+  const rawData = dataLine.replace("data:", "").trim();
+  try {
+    return {
+      event: eventLine.replace("event:", "").trim(),
+      data: JSON.parse(rawData)
+    };
+  } catch {
+    return null;
+  }
 }

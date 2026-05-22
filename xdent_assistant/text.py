@@ -31,7 +31,6 @@ STEM_SUFFIXES = (
     "emi",
     "ami",
     "eho",
-    "eho",
     "ymi",
     "ych",
     "ich",

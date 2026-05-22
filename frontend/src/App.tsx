@@ -21,7 +21,7 @@ import {
   User,
   Zap
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { fetchPricing, fetchStats, ingestData, sendChatStream } from "./api";
 import type {
   AgentStep,
@@ -84,6 +84,8 @@ function App() {
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [pricing, setPricing] = useState<PriceInfoResponse | null>(null);
   const [liveSteps, setLiveSteps] = useState<AgentStep[]>(emptySteps);
+  const abortRef = useRef<AbortController | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const isIndexed = Boolean(stats?.points_count && stats.points_count > 0);
   const savedResponse = useMemo(() => [...messages].reverse().find((item) => item.response)?.response ?? null, [messages]);
@@ -122,6 +124,10 @@ function App() {
     saveJson(STORAGE_TOLERANCE, retrievalTolerance);
   }, [retrievalTolerance]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
   async function refreshStats() {
     try {
       setStats(await fetchStats());
@@ -142,6 +148,10 @@ function App() {
     event?.preventDefault();
     const text = message.trim();
     if (!text || !isIndexed || loading) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     const userMessage: ChatMessage = {
       id: createId(),
@@ -167,7 +177,8 @@ function App() {
           session_id: sessionId,
           user: compactUser(userInfo)
         },
-        (step) => setLiveSteps((current) => mergeStep(current, step))
+        (step) => setLiveSteps((current) => mergeStep(current, step)),
+        controller.signal
       );
 
       const assistantMessage: ChatMessage = {
@@ -276,6 +287,7 @@ function App() {
                   <ChatBubble key={item.id} message={item} />
                 ))}
                 {loading && <PendingBubble steps={liveSteps} />}
+                <div ref={messagesEndRef} />
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2">
@@ -287,12 +299,24 @@ function App() {
               </div>
 
               <form className="mt-4 flex flex-col gap-3 md:flex-row" onSubmit={handleSend}>
-                <textarea
-                  className="field-input min-h-24 flex-1 resize-none"
-                  value={message}
-                  onChange={(event) => setMessage(event.target.value)}
-                  placeholder="Dotaz zákazníka..."
-                />
+                <div className="relative flex-1">
+                  <textarea
+                    className="field-input min-h-24 w-full resize-none"
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                    onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                        event.preventDefault();
+                        void handleSend();
+                      }
+                    }}
+                    placeholder="Dotaz zákazníka… (Ctrl+Enter odešle)"
+                    maxLength={4000}
+                  />
+                  <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-slate-400">
+                    {message.length}/4000
+                  </span>
+                </div>
                 <button className="primary-button h-auto min-h-12 md:w-40" type="submit" disabled={loading || !isIndexed || !message.trim()}>
                   {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
                   Odeslat
@@ -387,12 +411,29 @@ function WelcomeBlock() {
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const usage = message.response?.usage;
+  const [copied, setCopied] = useState(false);
+
+  async function copyContent() {
+    await navigator.clipboard?.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
   return (
     <article className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
+      <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"} group relative`}>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs">
           <span className="font-semibold">{isUser ? "Uživatel" : message.response?.topic_label ?? "Asistent"}</span>
-          <span className={isUser ? "text-white/70" : "text-slate-400"}>{formatTime(message.created_at)}</span>
+          <div className="flex items-center gap-2">
+            <span className={isUser ? "text-white/70" : "text-slate-400"}>{formatTime(message.created_at)}</span>
+            <button
+              className={`opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? "text-white/70 hover:text-white" : "text-slate-400 hover:text-slate-600"}`}
+              onClick={copyContent}
+              title="Kopírovat zprávu"
+            >
+              {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+            </button>
+          </div>
         </div>
         <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
         {!isUser && message.response && (

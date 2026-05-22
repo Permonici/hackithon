@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from functools import lru_cache
 from math import ceil
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,6 +14,11 @@ from .schemas import AgentStep, ChatResponse, Source, UsageEstimate, UserInfo
 from .topics import classify_topic
 from .utils import append_jsonl, utc_now
 from .vectorstore import search_sources
+
+
+@lru_cache(maxsize=4)
+def _get_llm(model: str, api_key: str) -> ChatOpenAI:
+    return ChatOpenAI(model=model, api_key=api_key, temperature=0.2)
 
 
 SYSTEM_PROMPT = """Jsi AI operátor 1. úrovně podpory pro stomatologický software XDENT.
@@ -185,11 +191,7 @@ class SupportAgent:
         if not self.settings.openai_api_key:
             return self._fallback_answer(topic_label, sources)
 
-        llm = ChatOpenAI(
-            model=self.settings.openai_chat_model,
-            api_key=self.settings.openai_api_key,
-            temperature=1,
-        )
+        llm = _get_llm(self.settings.openai_chat_model, self.settings.openai_api_key)
         prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", SYSTEM_PROMPT),

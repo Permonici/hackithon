@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
+from functools import lru_cache
 from typing import Any
 
 from langchain_core.documents import Document
@@ -21,23 +22,30 @@ from .schemas import IngestResponse, Source, StatsResponse
 from .utils import compact_text
 
 
-def make_embeddings(settings: Settings) -> OpenAIEmbeddings:
-    kwargs: dict[str, Any] = {
-        "model": settings.openai_embedding_model,
-        "api_key": settings.openai_api_key,
-    }
-    if settings.openai_embedding_dimensions:
-        kwargs["dimensions"] = settings.openai_embedding_dimensions
+@lru_cache(maxsize=4)
+def make_embeddings(model: str, api_key: str, dimensions: int | None) -> OpenAIEmbeddings:
+    kwargs: dict[str, Any] = {"model": model, "api_key": api_key}
+    if dimensions:
+        kwargs["dimensions"] = dimensions
     return OpenAIEmbeddings(**kwargs)
 
 
-def get_qdrant_client(settings: Settings) -> QdrantClient:
-    return QdrantClient(url=settings.qdrant_url)
+@lru_cache(maxsize=4)
+def get_qdrant_client(url: str) -> QdrantClient:
+    return QdrantClient(url=url)
+
+
+def _embeddings(settings: Settings) -> OpenAIEmbeddings:
+    return make_embeddings(
+        settings.openai_embedding_model,
+        settings.openai_api_key,
+        settings.openai_embedding_dimensions or None,
+    )
 
 
 def build_vector_store(settings: Settings) -> QdrantVectorStore:
     return QdrantVectorStore.from_existing_collection(
-        embedding=make_embeddings(settings),
+        embedding=_embeddings(settings),
         sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
         retrieval_mode=RetrievalMode.HYBRID,
         collection_name=settings.qdrant_collection,
@@ -84,7 +92,7 @@ def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestRe
 
     QdrantVectorStore.from_documents(
         documents,
-        embedding=make_embeddings(settings),
+        embedding=_embeddings(settings),
         sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
         retrieval_mode=RetrievalMode.HYBRID,
         ids=ids,
@@ -92,6 +100,7 @@ def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestRe
         url=settings.qdrant_url,
         force_recreate=recreate,
     )
+    get_qdrant_client.cache_clear()
 
     return IngestResponse(
         collection=settings.qdrant_collection,
@@ -110,25 +119,32 @@ def search_sources(
     topic_hint: str | None,
     tolerance: str = "balanced",
 ) -> list[Source]:
-    store = build_vector_store(settings)
+    try:
+        store = build_vector_store(settings)
+    except Exception:
+        return []
+
     effective_k = _effective_k(top_k, tolerance)
     topic_filter = _topic_filter(topic_hint) if topic_hint else None
     docs_with_scores: list[tuple[Document, float]] = []
 
-    for search_query in _query_variants(query, topic_hint, tolerance):
-        docs_with_scores.extend(
-            store.similarity_search_with_score(
-                search_query,
-                k=effective_k,
-                filter=topic_filter,
+    try:
+        for search_query in _query_variants(query, topic_hint, tolerance):
+            docs_with_scores.extend(
+                store.similarity_search_with_score(
+                    search_query,
+                    k=effective_k,
+                    filter=topic_filter,
+                )
             )
-        )
 
-    if topic_hint and tolerance in {"balanced", "broad"}:
-        docs_with_scores.extend(store.similarity_search_with_score(query, k=effective_k))
+        if topic_hint and tolerance in {"balanced", "broad"}:
+            docs_with_scores.extend(store.similarity_search_with_score(query, k=effective_k))
 
-    if not docs_with_scores and topic_hint:
-        docs_with_scores = store.similarity_search_with_score(query, k=effective_k)
+        if not docs_with_scores and topic_hint:
+            docs_with_scores = store.similarity_search_with_score(query, k=effective_k)
+    except Exception:
+        return []
 
     docs_with_scores = _dedupe_and_rank(docs_with_scores, limit=top_k, topic_hint=topic_hint)
 
@@ -204,7 +220,7 @@ def _dedupe_and_rank(
 
 
 def get_stats(settings: Settings) -> StatsResponse:
-    client = get_qdrant_client(settings)
+    client = get_qdrant_client(settings.qdrant_url)
     qdrant_ready = True
     points_count = 0
     topic_counts: Counter[str] = Counter()
@@ -243,7 +259,7 @@ def get_stats(settings: Settings) -> StatsResponse:
 
 
 def qdrant_collection_exists(settings: Settings) -> bool:
-    client = get_qdrant_client(settings)
+    client = get_qdrant_client(settings.qdrant_url)
     try:
         client.get_collection(settings.qdrant_collection)
         return True

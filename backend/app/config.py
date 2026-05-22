@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     qdrant_collection: str = Field(default="xdent_transcripts", validation_alias="QDRANT_COLLECTION")
 
     data_dir: Path = Field(
-        default=Path(r"C:\Users\medun\Desktop\hacktaton\hackathon-filtered-expanded"),
+        default=Path("data"),
         validation_alias="DATA_DIR",
     )
     logs_dir: Path = Field(default=Path("logs"), validation_alias="LOGS_DIR")
