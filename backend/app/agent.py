@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import threading
+from dataclasses import dataclass
 from functools import lru_cache
 from math import ceil
 
@@ -8,6 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from .cache import QueryCache
 from .config import Settings
 from .pricing import resolve_chat_prices, resolve_embedding_price
 from .schemas import AgentStep, ChatResponse, Source, UsageEstimate, UserInfo
@@ -19,6 +21,22 @@ from .vectorstore import search_sources
 @lru_cache(maxsize=4)
 def _get_llm(model: str, api_key: str) -> ChatOpenAI:
     return ChatOpenAI(model=model, api_key=api_key, temperature=0.2)
+
+
+# Module-level cache singleton – initialised lazily on first use.
+_agent_cache: QueryCache | None = None
+_cache_init_lock = threading.Lock()
+
+
+def get_agent_cache(settings: Settings) -> QueryCache:
+    global _agent_cache
+    if _agent_cache is None:
+        with _cache_init_lock:
+            if _agent_cache is None:
+                _agent_cache = QueryCache(
+                    persist_path=settings.logs_dir / "frequent_queries.json"
+                )
+    return _agent_cache
 
 
 SYSTEM_PROMPT = """Jsi AI operátor 1. úrovně podpory pro stomatologický software XDENT.
@@ -62,6 +80,14 @@ class SupportAgent:
         session_id: str | None = None,
         user: UserInfo | None = None,
     ) -> ChatResponse:
+        # ── cache lookup ──────────────────────────────────────────────────────
+        cache = get_agent_cache(self.settings)
+        cache_key, normalized_query = cache.build_key(message, strict_mode, retrieval_tolerance, top_k)
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached.model_copy(update={"session_id": session_id, "user": user})
+
+        # ── normal pipeline ───────────────────────────────────────────────────
         steps: list[AgentStep] = []
 
         classified = classify_topic(message)
@@ -179,6 +205,10 @@ class SupportAgent:
             usage=self._estimate_usage(message, answer, sources, used_llm),
         )
         self._log(message, response)
+
+        # ── cache the result (keyed without session/user) ─────────────────────
+        cache.put(cache_key, normalized_query, response)
+
         return response
 
     def _draft_answer(

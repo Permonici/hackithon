@@ -7,10 +7,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .agent import SupportAgent
+from .agent import SupportAgent, get_agent_cache
 from .config import get_settings
 from .pricing import resolve_price_info
 from .schemas import (
+    CacheStatsResponse,
     ChatRequest,
     ChatResponse,
     EvalRequest,
@@ -164,6 +165,11 @@ def evaluate(request: EvalRequest) -> EvalResponse:
             )
         )
     return EvalResponse(total=len(results), topic_matches=matches, results=results)
+
+
+@app.get(f"{settings.api_prefix}/cache/stats", response_model=CacheStatsResponse)
+def cache_stats() -> CacheStatsResponse:
+    return CacheStatsResponse(**get_agent_cache(settings).stats())
 
 
 def _ensure_ready() -> None:

@@ -88,3 +88,14 @@ export type ChatRequestPayload = {
   session_id: string;
   user?: UserInfo | null;
 };
+
+export type FrequentQuery = {
+  query: string;
+  count: number;
+};
+
+export type CacheStats = {
+  active_entries: number;
+  total_tracked_queries: number;
+  top_frequent: FrequentQuery[];
+};

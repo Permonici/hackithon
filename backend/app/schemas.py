@@ -121,3 +121,14 @@ class EvalResponse(BaseModel):
     total: int
     topic_matches: int
     results: list[EvalResult]
+
+
+class FrequentQuery(BaseModel):
+    query: str
+    count: int
+
+
+class CacheStatsResponse(BaseModel):
+    active_entries: int
+    total_tracked_queries: int
+    top_frequent: list[FrequentQuery]
