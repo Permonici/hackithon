@@ -61,6 +61,10 @@ export async function sendChatStream(
       if (parsed.event === "final") {
         finalResponse = parsed.data as ChatResponse;
       }
+      if (parsed.event === "error") {
+        const payload = parsed.data as { message?: string; detail?: string };
+        throw new Error(payload.message || payload.detail || "Backend při odpovědi vrátil chybu.");
+      }
     }
   }
 

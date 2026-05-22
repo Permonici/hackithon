@@ -41,7 +41,6 @@ class OpenAICompatibleLLM:
         payload = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.1,
             "max_tokens": 260,
         }
         request = urllib.request.Request(

@@ -17,7 +17,7 @@ SYSTEM_PROMPT = """Jsi AI operátor 1. úrovně podpory pro stomatologický soft
 Odpovídej česky, velmi stručně a přímo k věci.
 Použij pouze dodané zdroje z transkripcí.
 Pokud zdroje nestačí, řekni to a doporuč eskalaci na podporu.
-Na konec uveď krátký řádek `Zdroj: ...`.
+Na konec uveď krátký řádek `Zdroj: ...` a použij přesný název zdroje z kontextu, ne pouze číslo v hranaté závorce.
 Nevymýšlej postupy mimo kontext."""
 
 
@@ -111,14 +111,21 @@ class SupportAgent:
             used_llm = False
         else:
             escalation_packet = None
-            answer, used_llm = self._draft_answer(message, classified.label, sources)
+            try:
+                answer, used_llm = self._draft_answer(message, classified.label, sources)
+                answer_status = "done"
+                answer_detail = "Odpověď je krátká, opřená o zdroje a připravená pro chat."
+            except Exception as exc:
+                answer, used_llm = self._fallback_answer(classified.label, sources)
+                answer_status = "warning"
+                answer_detail = f"LLM odpověď se nepodařila, použit bezpečný fallback ze zdrojů: {exc}"
 
         steps.append(
             AgentStep(
                 id="answer",
                 label="Sestavení odpovědi",
-                status="done",
-                detail="Odpověď je krátká, opřená o zdroje a připravená pro chat.",
+                status=answer_status if grounded else "done",
+                detail=answer_detail if grounded else "Odpověď je bezpečně eskalovaná.",
                 payload={"used_llm": used_llm},
             )
         )
@@ -138,19 +145,12 @@ class SupportAgent:
 
     def _draft_answer(self, message: str, topic_label: str, sources: list[Source]) -> tuple[str, bool]:
         if not self.settings.openai_api_key:
-            best = sources[0]
-            resolution = best.resolution or best.summary or best.excerpt
-            return (
-                f"Téma: {topic_label}.\n"
-                f"Podle dostupných hovorů: {resolution}\n"
-                f"Zdroj: {best.source}"
-            ), False
+            return self._fallback_answer(topic_label, sources)
 
         llm = ChatOpenAI(
             model=self.settings.openai_chat_model,
             api_key=self.settings.openai_api_key,
-            temperature=0.1,
-            max_tokens=280,
+            temperature=1,
         )
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -174,6 +174,15 @@ class SupportAgent:
             }
         )
         return str(result.content).strip(), True
+
+    def _fallback_answer(self, topic_label: str, sources: list[Source]) -> tuple[str, bool]:
+        best = sources[0]
+        resolution = best.resolution or best.summary or best.excerpt
+        return (
+            f"Téma: {topic_label}.\n"
+            f"Podle dostupných hovorů: {resolution}\n"
+            f"Zdroj: {best.source}"
+        ), False
 
     def _log(self, message: str, response: ChatResponse) -> None:
         append_jsonl(

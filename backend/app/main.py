@@ -78,12 +78,32 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             yield _sse("step", running_step)
             await asyncio.sleep(0.25)
 
-        response = await asyncio.to_thread(
-            SupportAgent(settings).answer,
-            request.message,
-            strict_mode=request.strict_mode,
-            top_k=request.top_k,
-        )
+        try:
+            response = await asyncio.to_thread(
+                SupportAgent(settings).answer,
+                request.message,
+                strict_mode=request.strict_mode,
+                top_k=request.top_k,
+            )
+        except Exception as exc:
+            yield _sse(
+                "step",
+                {
+                    "id": "error",
+                    "label": "Chyba odpovědi",
+                    "status": "error",
+                    "detail": f"Odpověď se nepodařila sestavit: {exc}",
+                },
+            )
+            yield _sse(
+                "error",
+                {
+                    "message": "Odpověď se nepodařila sestavit. Zkuste dotaz znovu nebo použijte podporu.",
+                    "detail": str(exc),
+                },
+            )
+            return
+
         for step in response.steps:
             yield _sse("step", step.model_dump())
             await asyncio.sleep(0.2)
