@@ -1,0 +1,52 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    container_name: xdent-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: xdent-backend
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-1536}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-xdent_transcripts}
+      DATA_DIR: /data
+      LOGS_DIR: /app/logs
+      CHUNK_SIZE: ${CHUNK_SIZE:-950}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-150}
+      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-6}
+      STRICT_MIN_SCORE: ${STRICT_MIN_SCORE:-0.35}
+      LENIENT_MIN_SCORE: ${LENIENT_MIN_SCORE:-0.18}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080}
+    ports:
+      - "8000:8000"
+    volumes:
+      - "${LOCAL_DATA_DIR:-C:/Users/medun/Desktop/hacktaton/hackathon-filtered-expanded}:/data:ro"
+      - ./logs:/app/logs
+    depends_on:
+      - qdrant
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: /api
+    container_name: xdent-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  qdrant_data:

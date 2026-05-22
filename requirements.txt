@@ -1,0 +1,2 @@
+# Lokální offline prototyp v kořenových skriptech běží na standardní knihovně Pythonu 3.10+.
+# Plná aplikace používá backend/requirements.txt a Docker Compose.

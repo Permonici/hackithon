@@ -1,0 +1,27 @@
+[
+  {
+    "id": "E01",
+    "question": "Nejde mi odeslat ePoukaz, systém píše chybu se schválením a úhradou. Co mám zkontrolovat?",
+    "expected_topic": "erecept"
+  },
+  {
+    "id": "E02",
+    "question": "Po instalaci certifikátu se uživatel nemůže přihlásit do XDENTu.",
+    "expected_topic": "certificate-authentication-setup"
+  },
+  {
+    "id": "E03",
+    "question": "Dokument se netiskne správně a potřebuji upravit šablonu tisku.",
+    "expected_topic": "printing-templates-documents"
+  },
+  {
+    "id": "E04",
+    "question": "Kde v kalendáři změním termín objednaného pacienta?",
+    "expected_topic": "calendar-scheduling-booking"
+  },
+  {
+    "id": "E05",
+    "question": "Při vykazování na pojišťovnu se mi vrací kontrolní chyba VZP.",
+    "expected_topic": "vzp"
+  }
+]
