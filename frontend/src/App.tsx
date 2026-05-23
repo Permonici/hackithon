@@ -31,6 +31,7 @@ const STORAGE_AGENT_MODE = "xdent.chat.agentMode";
 const STORAGE_PATIENT_MEMORY = "xdent.chat.patientMemory";
 
 const agentOptions: Array<{ id: AgentMode; label: string; hint: string; icon: ReactNode }> = [
+  { id: "auto", label: "AI vybere", hint: "orchestrator", icon: <Zap size={15} /> },
   { id: "support", label: "Podpora", hint: "XDENT software", icon: <Bot size={15} /> },
   { id: "patient", label: "Pacient", hint: "urgence a termin", icon: <HeartPulse size={15} /> },
   { id: "triage", label: "Triaz", hint: "priorita pripadu", icon: <Activity size={15} /> },
@@ -39,6 +40,11 @@ const agentOptions: Array<{ id: AgentMode; label: string; hint: string; icon: Re
 ];
 
 const demoQuestions: Record<AgentMode, string[]> = {
+  auto: [
+    "Nejde mi prihlaseni do XDENTu a nevim, jestli je problem v certifikatu.",
+    "Mam otok, horecku a silnou bolest. Jsem v Brne, telefon 777 123 456.",
+    "Najdi nejdrivejsi termin v Praze pro bolest zubu."
+  ],
   support: [
     "Nejde mi odeslat ePoukaz, system pise chybu s uhradou. Co mam zkontrolovat?",
     "Po instalaci certifikatu se uzivatel nemuze prihlasit do XDENTu.",
@@ -67,6 +73,7 @@ const demoQuestions: Record<AgentMode, string[]> = {
 };
 
 const emptySteps: AgentStep[] = [
+  { id: "agent", label: "AI agent", status: "queued", detail: "Cekam na predani spravnemu specialistovi." },
   { id: "classify", label: "Tema", status: "queued", detail: "Cekam na dotaz." },
   { id: "retrieve", label: "Retrieval", status: "queued", detail: "Pripraveno vyhledat podobne hovory." },
   { id: "validate", label: "Jistota", status: "queued", detail: "Overim, jestli zdroje staci." },
@@ -190,7 +197,18 @@ function App() {
   }
 
   function chooseAgent(next: AgentMode) {
+    if (next === agentMode) return;
+    const agent = agentOptions.find((option) => option.id === next);
     setAgentMode(next);
+    setMessages((current) => [
+      ...current,
+      {
+        id: createId(),
+        role: "assistant",
+        content: handoffMessage(next, agent?.label ?? "AI agent"),
+        created_at: new Date().toISOString()
+      }
+    ]);
     if (!message.trim() || Object.values(demoQuestions).flat().includes(message)) {
       setMessage(demoQuestions[next][0]);
     }
@@ -452,21 +470,29 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
 }
 
 function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: (mode: AgentMode) => void }) {
+  const active = agentOptions.find((agent) => agent.id === selected) ?? agentOptions[0];
+
   return (
-    <div className="agent-switch-wrap">
-      <div className="agent-switch-title">Prepnout agenta</div>
-      <div className="agent-switch thin-scroll" aria-label="Vyber agenta">
-        {agentOptions.map((agent) => (
-          <button
-            key={agent.id}
-            className={`agent-option ${selected === agent.id ? "agent-option-active" : ""}`}
-            type="button"
-            onClick={() => onSelect(agent.id)}
-          >
-            <span className="inline-flex items-center gap-1.5">{agent.icon}{agent.label}</span>
-            <small>{agent.hint}</small>
-          </button>
-        ))}
+    <div className="agent-handoff-wrap">
+      <div className="agent-handoff-panel">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="agent-handoff-icon">{active.icon}</div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Aktivni AI agent</div>
+            <div className="truncate text-sm font-semibold text-ink">{active.label}</div>
+            <div className="truncate text-xs text-slate-500">
+              {selected === "auto" ? "Orchestrator sam preda dotaz specialistovi" : active.hint}
+            </div>
+          </div>
+        </div>
+        <label className="agent-select-label">
+          Predat komu
+          <select className="agent-select" value={selected} onChange={(event) => onSelect(event.target.value as AgentMode)}>
+            {agentOptions.map((agent) => (
+              <option key={agent.id} value={agent.id}>{agent.label} - {agent.hint}</option>
+            ))}
+          </select>
+        </label>
       </div>
     </div>
   );
@@ -496,6 +522,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   const visibleContent = isUser ? message.content : stripSourceLines(message.content);
   const answerConfidence = answerConfidencePercent(message.response);
   const sourceStrength = sourceStrengthPercent(message.response?.sources ?? []);
+  const routedByOrchestrator = message.response?.requested_agent_mode === "auto";
   const assistantTitle = message.response
     ? `${message.response.agent_label ?? "XDENT asistent"} - ${message.response.topic_label ?? "odpoved"}`
     : "XDENT asistent";
@@ -521,6 +548,11 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         <p className="whitespace-pre-wrap text-sm leading-6">{visibleContent}</p>
         {!isUser && message.response && (
           <div className="mt-3 grid gap-2 text-xs">
+            {routedByOrchestrator && (
+              <div className="rounded-md border border-mint/20 bg-mint/10 p-2 text-mint">
+                <span className="font-semibold">AI predani:</span> {message.response.agent_route_reason ?? "Orchestrator vybral vhodneho specialistu."}
+              </div>
+            )}
             <div className="rounded-md bg-white/70 p-2 text-slate-600">
               <div className="mb-1 flex items-center justify-between">
                 <span>Jistota odpovedi</span>
@@ -673,7 +705,15 @@ function urgencyLabel(value: UserInfo["urgency"]): string {
   }[value ?? "normal"];
 }
 
+function handoffMessage(mode: AgentMode, label: string): string {
+  if (mode === "auto") {
+    return "Prepinam na AI orchestratora. Dalsi dotaz sam preda nejvhodnejsimu specialistovi.";
+  }
+  return `Predavam konverzaci agentovi: ${label}. Odpovi strucne a podle dostupnych podkladu.`;
+}
+
 function placeholderForAgent(agentMode: AgentMode): string {
+  if (agentMode === "auto") return "Napiste dotaz; AI sama vybere vhodneho specialistu...";
   if (agentMode === "patient") return "Popiste problem, mesto a kontakt pacienta...";
   if (agentMode === "triage") return "Popiste priznaky a jak dlouho trvaji...";
   if (agentMode === "scheduler") return "Zadejte mesto, typ osetreni a kontakt...";

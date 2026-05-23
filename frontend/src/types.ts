@@ -1,5 +1,5 @@
 export type RetrievalTolerance = "strict" | "balanced" | "broad";
-export type AgentMode = "support" | "patient" | "triage" | "scheduler" | "handoff";
+export type AgentMode = "auto" | "support" | "patient" | "triage" | "scheduler" | "handoff";
 
 export type UserInfo = {
   name?: string | null;
@@ -86,6 +86,8 @@ export type ChatResponse = {
   answer: string;
   agent_mode: AgentMode;
   agent_label: string;
+  requested_agent_mode: AgentMode;
+  agent_route_reason?: string | null;
   topic: string;
   topic_label: string;
   confidence: number;

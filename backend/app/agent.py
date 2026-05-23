@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
 from math import ceil
@@ -64,6 +65,10 @@ Nevymýšlej postupy mimo kontext."""
 
 
 AGENT_PROFILES = {
+    "auto": {
+        "label": "AI orchestrator",
+        "instruction": "Vyber nejvhodnejsiho specialistu a drz odpoved velmi kratkou.",
+    },
     "support": {
         "label": "Technicka podpora",
         "instruction": "Res technicke dotazy k XDENTu podle transkripci.",
@@ -129,7 +134,8 @@ class SupportAgent:
         session_id: str | None = None,
         user: UserInfo | None = None,
     ) -> ChatResponse:
-        agent_mode = self._normalize_agent_mode(agent_mode)
+        requested_agent_mode = self._normalize_agent_mode(agent_mode)
+        agent_mode, route_reason = self._route_agent(message, requested_agent_mode, user)
         profile = AGENT_PROFILES[agent_mode]
         memory_store = get_patient_memory_store(str(self.settings.logs_dir / "patient_memory.json"))
         effective_user, memory_updates = memory_store.merge(
@@ -151,6 +157,8 @@ class SupportAgent:
                 "user": effective_user,
                 "agent_mode": agent_mode,
                 "agent_label": profile["label"],
+                "requested_agent_mode": requested_agent_mode,
+                "agent_route_reason": route_reason,
                 "memory_updates": [],
             })
 
@@ -159,10 +167,15 @@ class SupportAgent:
         steps.append(
             AgentStep(
                 id="agent",
-                label="Vyber agenta",
+                label="Predani AI agentovi",
                 status="done",
-                detail=f"Aktivni agent: {profile['label']}.",
-                payload={"agent_mode": agent_mode, "agent_label": profile["label"]},
+                detail=f"{route_reason} Aktivni agent: {profile['label']}.",
+                payload={
+                    "requested_agent_mode": requested_agent_mode,
+                    "agent_mode": agent_mode,
+                    "agent_label": profile["label"],
+                    "route_reason": route_reason,
+                },
             )
         )
         if memory_updates:
@@ -272,6 +285,12 @@ class SupportAgent:
             used_llm = False
             answer_status = "done"
             answer_detail = "Eskalacni agent pripravil predani podpore."
+        elif care_result and agent_mode in {"patient", "triage", "scheduler"}:
+            escalation_packet = None
+            answer = self._compose_care_answer(care_result, effective_user, agent_mode)
+            used_llm = False
+            answer_status = "done"
+            answer_detail = f"{profile['label']} sestavil kratky dalsi krok bez zbytecneho LLM volani."
         elif not grounded:
             escalation_packet = create_escalation_packet_tool.invoke(
                 {
@@ -314,10 +333,10 @@ class SupportAgent:
                 care=care_result,
             )
 
-        if care_result and agent_mode != "handoff":
-            answer = self._compose_care_answer(care_result, effective_user, agent_mode)
+        if care_result and agent_mode == "support":
+            answer = self._append_care_context(answer, care_result)
 
-        answer = self._strip_source_lines(answer)
+        answer = self._tighten_answer(self._strip_source_lines(answer), max_lines=5 if care_result else 4)
 
         steps.append(
             AgentStep(
@@ -334,9 +353,11 @@ class SupportAgent:
             topic=classified.topic or "unknown",
             topic_label=classified.label,
             confidence=classified.confidence,
-            answer_confidence=self._answer_confidence(classified.confidence, sources, grounded),
+            answer_confidence=self._answer_confidence(classified.confidence, sources, grounded, care_result, agent_mode),
             agent_mode=agent_mode,
             agent_label=profile["label"],
+            requested_agent_mode=requested_agent_mode,
+            agent_route_reason=route_reason,
             sources=sources,
             steps=steps,
             escalation_packet=escalation_packet,
@@ -578,6 +599,60 @@ class SupportAgent:
     def _normalize_agent_mode(self, agent_mode: str) -> str:
         return agent_mode if agent_mode in AGENT_PROFILES else "support"
 
+    def _route_agent(
+        self,
+        message: str,
+        requested_agent_mode: str,
+        user: UserInfo | None,
+    ) -> tuple[str, str]:
+        if requested_agent_mode != "auto":
+            return requested_agent_mode, "Rucne vybrany AI agent."
+
+        text = self._plain(message)
+        has_patient_context = bool(
+            user
+            and (
+                user.patient_name
+                or user.patient_city
+                or user.patient_phone
+                or user.patient_email
+                or user.problem_summary
+                or user.urgency
+            )
+        )
+
+        red_flags = (
+            "otok",
+            "horeck",
+            "krvac",
+            "uraz",
+            "silna bolest",
+            "akut",
+            "neustavajici bolest",
+        )
+        booking_terms = (
+            "termin",
+            "objednat",
+            "rezerv",
+            "predobjednat",
+            "nejdrive",
+            "nejblizsi",
+            "hygien",
+            "ordinac",
+            "pobliz",
+        )
+        escalation_terms = ("eskal", "predat", "2. urov", "druha urov")
+
+        if any(term in text for term in escalation_terms):
+            return "handoff", "AI orchestrator rozpoznal potrebu predani podpore."
+        if any(term in text for term in red_flags):
+            return "triage", "AI orchestrator rozpoznal priznaky s vyssi urgenci."
+        if any(term in text for term in booking_terms):
+            return "scheduler", "AI orchestrator rozpoznal pozadavek na termin nebo ordinaci."
+        if has_patient_context:
+            return "patient", "AI orchestrator nasel ulozene pacientske udaje."
+        return "support", "AI orchestrator zvolil technickou podporu XDENT."
+
     def _build_escalation_packet(
         self,
         *,
@@ -636,7 +711,7 @@ class SupportAgent:
         )
 
     def _wants_care_workflow(self, message: str, user: UserInfo | None) -> bool:
-        text = message.lower()
+        text = self._plain(message)
         keywords = (
             "pacient",
             "bolest",
@@ -675,10 +750,11 @@ class SupportAgent:
             or "predobjednat" in text
             or "rezervovat pacienta" in text
         )
-        return has_patient_context or explicit_booking
+        keyword_hit = any(keyword in text for keyword in keywords)
+        return has_patient_context or explicit_booking or keyword_hit
 
     def _wants_booking(self, message: str, user: UserInfo | None, triage: TriageResult) -> bool:
-        text = message.lower()
+        text = self._plain(message)
         booking_keywords = (
             "termin",
             "termín",
@@ -746,7 +822,38 @@ class SupportAgent:
         ]
         return "\n".join(visible_lines).strip()
 
-    def _answer_confidence(self, topic_confidence: float, sources: list[Source], grounded: bool) -> float:
+    def _tighten_answer(self, answer: str, *, max_lines: int) -> str:
+        lines = [line.strip() for line in answer.splitlines() if line.strip()]
+        if len(lines) <= max_lines:
+            return "\n".join(lines)
+        return "\n".join(lines[:max_lines])
+
+    def _plain(self, value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", value.lower())
+        return "".join(char for char in normalized if not unicodedata.combining(char))
+
+    def _answer_confidence(
+        self,
+        topic_confidence: float,
+        sources: list[Source],
+        grounded: bool,
+        care: CareWorkflowResult | None = None,
+        agent_mode: str = "support",
+    ) -> float:
+        if care and agent_mode in {"patient", "triage", "scheduler", "handoff"}:
+            triage_confidence = care.triage.confidence if care.triage else 0.55
+            best_source = max((max(0.0, min(float(source.score), 1.0)) for source in sources), default=0.0)
+            base = max(0.35, triage_confidence * 0.75)
+            if grounded:
+                base = max(base, (triage_confidence * 0.45) + (best_source * 0.35))
+            if care.clinics:
+                base = max(base, 0.72)
+            if care.appointment and care.appointment.status == "pre_reserved":
+                base = max(base, 0.82)
+            if care.triage and care.triage.urgency == "critical":
+                base = max(base, 0.88)
+            return round(max(0.0, min(base, 0.96)), 3)
+
         if not grounded:
             return 0.0
         normalized_topic = max(0.0, min(float(topic_confidence), 1.0))
@@ -882,8 +989,10 @@ class SupportAgent:
                 "timestamp": utc_now(),
                 "question": message,
                 "answer": response.answer,
+                "requested_agent_mode": response.requested_agent_mode,
                 "agent_mode": response.agent_mode,
                 "agent_label": response.agent_label,
+                "agent_route_reason": response.agent_route_reason,
                 "topic": response.topic,
                 "topic_label": response.topic_label,
                 "confidence": response.confidence,

@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-AgentMode = Literal["support", "patient", "triage", "scheduler", "handoff"]
+AgentMode = Literal["auto", "support", "patient", "triage", "scheduler", "handoff"]
 
 
 class UserInfo(BaseModel):
@@ -103,6 +103,8 @@ class ChatResponse(BaseModel):
     answer: str
     agent_mode: AgentMode = "support"
     agent_label: str = "Technicka podpora"
+    requested_agent_mode: AgentMode = "support"
+    agent_route_reason: str | None = None
     topic: str
     topic_label: str
     confidence: float
