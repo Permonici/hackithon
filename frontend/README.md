@@ -9,6 +9,8 @@ React + Tailwind konzole pro demonstraci XDENT asistenta.
 - panel s uživatelským kontextem,
 - price info tab s orientačním nákladem,
 - režimy tolerance hledání v chuncích,
+- hlasový vstup přes mikrofon,
+- volitelné čtení odpovědí nahlas,
 - realtime agent timeline,
 - evidence cards z transkripcí,
 - coverage témat,
