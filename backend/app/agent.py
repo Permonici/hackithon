@@ -228,6 +228,23 @@ class SupportAgent:
         )
         sources = self._select_answer_sources(retrieved_sources, classified.topic)
         best_score = max((source.score for source in sources), default=0.0)
+        min_score = self._min_score(strict_mode, retrieval_tolerance)
+        retrieval_fallback_used = False
+        if (not sources or best_score < min_score) and retrieval_tolerance != "broad":
+            broad_sources = search_sources(
+                self.settings,
+                message,
+                top_k=max(top_k, 6),
+                topic_hint=classified.topic or topic_hint,
+                tolerance="broad",
+            )
+            broad_selected = self._select_answer_sources(broad_sources, classified.topic)
+            broad_best_score = max((source.score for source in broad_selected), default=0.0)
+            if broad_best_score > best_score:
+                retrieved_sources = broad_sources
+                sources = broad_selected
+                best_score = broad_best_score
+                retrieval_fallback_used = True
         steps.append(
             AgentStep(
                 id="retrieve",
@@ -241,12 +258,12 @@ class SupportAgent:
                 payload={
                     "top_score": best_score,
                     "tolerance": retrieval_tolerance,
+                    "fallback_used": retrieval_fallback_used,
                     "sources": [source.model_dump() for source in sources[:3]],
                 },
             )
         )
 
-        min_score = self._min_score(strict_mode, retrieval_tolerance)
         grounded = bool(sources) and best_score >= min_score
         steps.append(
             AgentStep(
@@ -336,7 +353,7 @@ class SupportAgent:
         if care_result and agent_mode == "support":
             answer = self._append_care_context(answer, care_result)
 
-        answer = self._tighten_answer(self._strip_source_lines(answer), max_lines=5 if care_result else 4)
+        answer = self._tighten_answer(self._strip_source_lines(answer), max_lines=6 if care_result else 4)
 
         steps.append(
             AgentStep(
@@ -537,11 +554,10 @@ class SupportAgent:
                 lines.append(care.appointment.message)
 
         if care.clinics:
-            clinic_parts = []
+            lines.append("Moznosti v okoli:")
             for clinic in care.clinics[:2]:
                 accepting = "bere nove pacienty" if clinic.accepting_new_patients else "nove pacienty jen po domluve"
-                clinic_parts.append(f"{clinic.name}: {clinic.earliest_slot}, {accepting}, tel. {clinic.phone}")
-            lines.append("Moznosti v okoli: " + "; ".join(clinic_parts))
+                lines.append(f"- {clinic.name}: {clinic.earliest_slot}, {accepting}, tel. {clinic.phone}")
 
         missing = self._missing_patient_fields(user, require_location=agent_mode in {"patient", "scheduler"})
         if missing:
@@ -640,18 +656,25 @@ class SupportAgent:
             )
         )
 
-        red_flags = (
+        critical_terms = (
             "otok",
             "horeck",
             "krvac",
             "uraz",
-            "silna bolest",
-            "akut",
-            "neustavajici bolest",
             "nesnesitelna bolest",
             "hnis",
             "absces",
             "nemuzu spat",
+        )
+        symptom_terms = (
+            "bolest",
+            "boli",
+            "bolavy zub",
+            "zub",
+            "pulzuje",
+            "zanet",
+            "neustavajici bolest",
+            "akut",
         )
         booking_terms = (
             "termin",
@@ -668,15 +691,21 @@ class SupportAgent:
             "kontrola",
             "cisteni",
         )
+        program_terms = ("xdent", "erecept", "epoukaz", "certifikat", "prihlas", "tisk", "sablon", "instal", "program")
+        program_problem_terms = ("nejde", "nefunguje", "chyba", "pise", "spadne", "neodesila", "nelze", "problem")
         patient_terms = ("pacient", "kontakt", "telefon", "email", "e-mail", "bydlim", "jsem z")
         escalation_terms = ("eskal", "predat", "2. urov", "druha urov", "operator", "recepce", "clovek")
 
         if any(term in text for term in escalation_terms):
             return "handoff", "AI poznala, ze je lepsi pripravit predani cloveku."
-        if any(term in text for term in red_flags):
+        if any(term in text for term in critical_terms):
             return "triage", "AI poznala priznaky, ktere mohou byt akutni."
+        if any(term in text for term in program_terms) and any(term in text for term in program_problem_terms):
+            return "support", "AI poznala technicky problem v programu XDENT."
         if any(term in text for term in booking_terms):
             return "scheduler", "AI poznala, ze pacient pravdepodobne potrebuje termin nebo ordinaci."
+        if any(term in text for term in symptom_terms):
+            return "triage", "AI poznala zdravotni popis a nejdrive overi nalehavost."
         if has_patient_context or any(term in text for term in patient_terms):
             return "patient", "AI pracuje s pacientskymi udaji a doplni, co chybi."
         return "support", "AI poznala dotaz k programu XDENT."
@@ -851,7 +880,17 @@ class SupportAgent:
         return "\n".join(visible_lines).strip()
 
     def _tighten_answer(self, answer: str, *, max_lines: int) -> str:
-        lines = [line.strip() for line in answer.splitlines() if line.strip()]
+        lines: list[str] = []
+        seen: set[str] = set()
+        for line in answer.splitlines():
+            cleaned = line.strip()
+            if not cleaned:
+                continue
+            fingerprint = self._plain(cleaned)
+            if fingerprint in seen:
+                continue
+            seen.add(fingerprint)
+            lines.append(cleaned)
         if len(lines) <= max_lines:
             return "\n".join(lines)
         return "\n".join(lines[:max_lines])
