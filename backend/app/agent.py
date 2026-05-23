@@ -517,7 +517,19 @@ class SupportAgent:
                 or (user.urgency and user.urgency != "normal")
             )
         )
-        return has_patient_context or any(keyword in text for keyword in keywords)
+        explicit_booking = (
+            "najdi nejdrivejsi" in text
+            or "nejdrivejsi termin" in text
+            or "nejblizsi termin" in text
+            or "akutni termin" in text
+            or "ordinac pobliz" in text
+            or "ordinace pobliz" in text
+            or "prijima nove pacienty" in text
+            or "dentalni hygien" in text
+            or "predobjednat" in text
+            or "rezervovat pacienta" in text
+        )
+        return has_patient_context or explicit_booking
 
     def _wants_booking(self, message: str, user: UserInfo | None, triage: TriageResult) -> bool:
         text = message.lower()

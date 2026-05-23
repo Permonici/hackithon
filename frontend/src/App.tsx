@@ -1,194 +1,82 @@
 import {
-  Activity,
   AlertTriangle,
-  Building2,
-  CalendarCheck,
-  CalendarPlus,
-  ChevronDown,
   CheckCircle2,
-  Clock3,
   Copy,
   Database,
-  FileSearch,
-  Gauge,
-  History,
   Loader2,
-  Mail,
-  Map,
-  MapPin,
   MessageSquare,
   Mic,
   MicOff,
-  Moon,
-  Phone,
   RefreshCw,
   Send,
-  ShieldCheck,
-  SlidersHorizontal,
-  Star,
-  Sun,
   Trash2,
-  User,
   Volume2,
   VolumeX,
+  X,
   Zap
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCacheStats, fetchClinics, fetchStats, ingestData, sendChatStream } from "./api";
-import type {
-  AgentStep,
-  CacheStats,
-  ChatMessage,
-  ChatResponse,
-  ClinicOption,
-  RetrievalTolerance,
-  Source,
-  StatsResponse,
-  UserInfo
-} from "./types";
+import { fetchCacheStats, fetchStats, ingestData, sendChatStream } from "./api";
+import type { AgentStep, CacheStats, ChatMessage, RetrievalTolerance, Source, StatsResponse } from "./types";
+
+const STORAGE_MESSAGES = "xdent.chat.messages";
+const STORAGE_SESSION = "xdent.chat.session";
+const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
 
 const demoQuestions = [
-  "Nejde mi odeslat ePoukaz, systém píše chybu s úhradou. Co mám zkontrolovat?",
-  "Po instalaci certifikátu se uživatel nemůže přihlásit do XDENTu.",
-  "Dokument se netiskne správně a potřebuji upravit šablonu tisku.",
-  "Kde v kalendáři změním termín objednaného pacienta?"
+  "Nejde mi odeslat ePoukaz, system pise chybu s uhradou. Co mam zkontrolovat?",
+  "Po instalaci certifikatu se uzivatel nemuze prihlasit do XDENTu.",
+  "Dokument se netiskne spravne a potrebuji upravit sablonu tisku.",
+  "Kde v kalendari zmenim termin objednaneho pacienta?"
 ];
 
 const emptySteps: AgentStep[] = [
-  { id: "classify", label: "Téma", status: "queued", detail: "Čekám na dotaz." },
-  { id: "retrieve", label: "Retrieval", status: "queued", detail: "Připraveno vyhledat podobné hovory." },
-  { id: "validate", label: "Jistota", status: "queued", detail: "Ověřím, jestli zdroje stačí." },
-  { id: "answer", label: "Odpověď", status: "queued", detail: "Výsledek bude krátký a se zdrojem." }
+  { id: "classify", label: "Tema", status: "queued", detail: "Cekam na dotaz." },
+  { id: "retrieve", label: "Retrieval", status: "queued", detail: "Pripraveno vyhledat podobne hovory." },
+  { id: "validate", label: "Jistota", status: "queued", detail: "Overim, jestli zdroje staci." },
+  { id: "answer", label: "Odpoved", status: "queued", detail: "Vysledek bude kratky a se zdrojem." }
 ];
-
-const defaultUser: UserInfo = {
-  name: "",
-  clinic: "",
-  role: "",
-  software_version: "",
-  contact: "",
-  patient_name: "",
-  patient_identifier: "",
-  patient_age: "",
-  patient_city: "",
-  patient_address: "",
-  patient_phone: "",
-  patient_email: "",
-  preferred_contact_method: "any",
-  urgency: "normal",
-  problem_summary: ""
-};
-
-const toleranceOptions: Array<{ value: RetrievalTolerance; label: string; hint: string }> = [
-  { value: "strict", label: "Přesné", hint: "vyšší jistota" },
-  { value: "balanced", label: "Vyvážené", hint: "doporučeno" },
-  { value: "broad", label: "Širší", hint: "víc tolerance" }
-];
-
-const voiceLanguageOptions: Array<{ value: VoiceLanguage; label: string; hint: string }> = [
-  { value: "cs-CZ", label: "Cesky", hint: "CZ" },
-  { value: "sk-SK", label: "Slovensky", hint: "SK" },
-  { value: "en-US", label: "English", hint: "US" }
-];
-
-const STORAGE_MESSAGES = "xdent.chat.messages";
-const STORAGE_USER = "xdent.chat.user";
-const STORAGE_TOLERANCE = "xdent.chat.tolerance";
-const STORAGE_SESSION = "xdent.chat.session";
-const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
-const STORAGE_VOICE_LANGUAGE = "xdent.chat.voiceLanguage";
-const STORAGE_VOICE_URI = "xdent.chat.voiceUri";
-const STORAGE_THEME = "xdent.ui.theme";
-const STORAGE_FONT_SIZE = "xdent.ui.fontSize";
-
-type VoiceLanguage = "cs-CZ" | "sk-SK" | "en-US";
-type ThemeMode = "light" | "dark";
-type FontSizeMode = "normal" | "large" | "xlarge";
 
 function App() {
-  const [activeTab, setActiveTab] = useState<"chat" | "history" | "faq">("chat");
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadJson<ThemeMode>(STORAGE_THEME, "light"));
-  const [fontSizeMode, setFontSizeMode] = useState<FontSizeMode>(() => loadJson<FontSizeMode>(STORAGE_FONT_SIZE, "normal"));
+  const [open, setOpen] = useState(false);
   const [message, setMessage] = useState(demoQuestions[0]);
-  const [strictMode, setStrictMode] = useState(false);
-  const [retrievalTolerance, setRetrievalTolerance] = useState<RetrievalTolerance>(() =>
-    loadJson<RetrievalTolerance>(STORAGE_TOLERANCE, "balanced")
-  );
-  const [userInfo, setUserInfo] = useState<UserInfo>(() => loadJson<UserInfo>(STORAGE_USER, defaultUser));
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadJson<ChatMessage[]>(STORAGE_MESSAGES, []));
   const [sessionId] = useState(() => loadOrCreateSessionId());
   const [loading, setLoading] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [response, setResponse] = useState<ChatResponse | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [clinicDirectory, setClinicDirectory] = useState<ClinicOption[]>([]);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [liveSteps, setLiveSteps] = useState<AgentStep[]>(emptySteps);
-
-  // ── voice ─────────────────────────────────────────────────────────────────
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() =>
-    loadJson<boolean>(STORAGE_VOICE_OUTPUT, false)
-  );
-  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>(() =>
-    loadJson<VoiceLanguage>(STORAGE_VOICE_LANGUAGE, "cs-CZ")
-  );
-  const [preferredVoiceURI, setPreferredVoiceURI] = useState(() =>
-    loadJson<string>(STORAGE_VOICE_URI, "")
-  );
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() => loadJson<boolean>(STORAGE_VOICE_OUTPUT, false));
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const voiceInputSupported = typeof window !== "undefined" &&
-    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-  const voiceOutputSupported = typeof window !== "undefined" && !!window.speechSynthesis;
 
-  // ── refs ──────────────────────────────────────────────────────────────────
   const abortRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // ── derived ───────────────────────────────────────────────────────────────
+  const voiceInputSupported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const voiceOutputSupported = typeof window !== "undefined" && !!window.speechSynthesis;
   const isIndexed = Boolean(stats?.points_count && stats.points_count > 0);
   const savedResponse = useMemo(() => [...messages].reverse().find((item) => item.response)?.response ?? null, [messages]);
-  const visibleResponse = response ?? savedResponse;
-  const steps = loading ? liveSteps : visibleResponse?.steps ?? liveSteps;
-  const sources = visibleResponse?.sources ?? sourcesFromSteps(liveSteps);
-  const topScore = Math.max(0, ...sources.map((source) => source.score));
-  const fontScaleClass = fontSizeMode === "xlarge" ? "font-xlarge" : fontSizeMode === "large" ? "font-large" : "font-normal";
-  const mapClinics = visibleResponse?.clinics?.length ? visibleResponse.clinics : clinicDirectory;
-  const selectedVoice = selectAssistantVoice(ttsVoices, voiceLanguage, preferredVoiceURI);
-
-  const topicCoverage = useMemo(() => {
-    const counts = stats?.topics.map((topic) => topic.chunks) ?? [];
-    const max = Math.max(1, ...counts);
-    return (stats?.topics ?? []).slice(0, 7).map((topic) => ({
-      ...topic,
-      width: Math.max(6, Math.round((topic.chunks / max) * 100))
-    }));
-  }, [stats]);
-
-  // ── effects ───────────────────────────────────────────────────────────────
-  useEffect(() => { refreshStats(); refreshClinics(); refreshCacheStats(); }, []);
-
-  useEffect(() => { saveJson(STORAGE_MESSAGES, messages); }, [messages]);
-  useEffect(() => { saveJson(STORAGE_USER, userInfo); }, [userInfo]);
-  useEffect(() => { saveJson(STORAGE_TOLERANCE, retrievalTolerance); }, [retrievalTolerance]);
-  useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
-  useEffect(() => { saveJson(STORAGE_VOICE_LANGUAGE, voiceLanguage); }, [voiceLanguage]);
-  useEffect(() => { saveJson(STORAGE_VOICE_URI, preferredVoiceURI); }, [preferredVoiceURI]);
-  useEffect(() => { saveJson(STORAGE_THEME, themeMode); }, [themeMode]);
-  useEffect(() => { saveJson(STORAGE_FONT_SIZE, fontSizeMode); }, [fontSizeMode]);
+  const visibleSteps = loading ? liveSteps : savedResponse?.steps ?? liveSteps;
+  const selectedVoice = selectCzechVoice(ttsVoices);
+  const topFrequent = cacheStats?.top_frequent?.[0]?.query;
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", themeMode === "dark");
-  }, [themeMode]);
+    void refreshStats();
+    void refreshCacheStats();
+  }, []);
+
+  useEffect(() => { saveJson(STORAGE_MESSAGES, messages); }, [messages]);
+  useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, open]);
 
-  // Load available TTS voices (async on some browsers).
   useEffect(() => {
     if (!voiceOutputSupported) return;
     const load = () => setTtsVoices(window.speechSynthesis.getVoices());
@@ -197,7 +85,6 @@ function App() {
     return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
   }, [voiceOutputSupported]);
 
-  // Stop speaking when voice output is disabled mid-stream.
   useEffect(() => {
     if (!voiceOutputEnabled && isSpeaking) {
       window.speechSynthesis?.cancel();
@@ -205,42 +92,30 @@ function App() {
     }
   }, [voiceOutputEnabled, isSpeaking]);
 
-  // ── data fetchers ─────────────────────────────────────────────────────────
   async function refreshStats() {
     try { setStats(await fetchStats()); } catch { setStats(null); }
-  }
-
-  async function refreshClinics() {
-    try { setClinicDirectory(await fetchClinics()); } catch { setClinicDirectory([]); }
   }
 
   async function refreshCacheStats() {
     try { setCacheStats(await fetchCacheStats()); } catch { setCacheStats(null); }
   }
 
-  // ── voice input ───────────────────────────────────────────────────────────
   function startListening() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
 
     recognitionRef.current?.abort();
     const recognition = new SR();
-    recognition.lang = voiceLanguage;
+    recognition.lang = "cs-CZ";
     recognition.continuous = false;
     recognition.interimResults = true;
-
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = Array.from(event.results)
-        .map((r) => r[0].transcript)
-        .join("");
+      const transcript = Array.from(event.results).map((result) => result[0].transcript).join("");
       setMessage(transcript);
-      if (event.results[event.results.length - 1].isFinal) {
-        setIsListening(false);
-      }
+      if (event.results[event.results.length - 1].isFinal) setIsListening(false);
     };
     recognition.onerror = () => setIsListening(false);
     recognition.onend = () => setIsListening(false);
-
     recognitionRef.current = recognition;
     recognition.start();
     setIsListening(true);
@@ -251,42 +126,35 @@ function App() {
     setIsListening(false);
   }
 
-  // ── voice output ──────────────────────────────────────────────────────────
   const speak = useCallback((text: string) => {
     if (!voiceOutputEnabled || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-
-    // Strip markdown/source annotations for cleaner TTS.
     const cleaned = text.replace(/Zdroj:.*$/m, "").replace(/\[.*?\]/g, "").trim();
     const utterance = new SpeechSynthesisUtterance(cleaned);
-    utterance.lang = voiceLanguage;
-    utterance.rate = voiceLanguage === "en-US" ? 0.98 : 1.0;
-    utterance.pitch = 1.0;
-
+    utterance.lang = "cs-CZ";
+    utterance.rate = 1;
+    utterance.pitch = 1;
     if (selectedVoice) utterance.voice = selectedVoice;
-
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
-
     window.speechSynthesis.speak(utterance);
-  }, [voiceOutputEnabled, selectedVoice, voiceLanguage]);
+  }, [voiceOutputEnabled, selectedVoice]);
 
   function stopSpeaking() {
     window.speechSynthesis?.cancel();
     setIsSpeaking(false);
   }
 
-  // ── send message ──────────────────────────────────────────────────────────
-  async function submitMessage(text: string) {
+  async function handleSend(event?: FormEvent) {
+    event?.preventDefault();
+    const text = message.trim();
     if (!text || !isIndexed || loading) return;
 
-    // Abort any in-flight stream.
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    // Stop ongoing TTS.
     if (isSpeaking) stopSpeaking();
 
     const userMessage: ChatMessage = {
@@ -300,18 +168,17 @@ function App() {
     setMessage("");
     setLoading(true);
     setError(null);
-    setResponse(null);
     setLiveSteps(emptySteps);
 
     try {
       const result = await sendChatStream(
         {
           message: text,
-          strict_mode: strictMode,
-          top_k: retrievalTolerance === "broad" ? 8 : 6,
-          retrieval_tolerance: retrievalTolerance,
+          strict_mode: false,
+          top_k: 6,
+          retrieval_tolerance: "balanced" as RetrievalTolerance,
           session_id: sessionId,
-          user: compactUser(userInfo)
+          user: null
         },
         (step) => setLiveSteps((current) => mergeStep(current, step)),
         controller.signal
@@ -324,42 +191,17 @@ function App() {
         created_at: new Date().toISOString(),
         response: result
       };
-      setResponse(result);
       setMessages((current) => [...current, assistantMessage]);
-
-      // Auto-speak the response if voice output is enabled.
       if (voiceOutputEnabled) speak(result.answer);
-
-      // Refresh cache stats to reflect new hit counts.
       void refreshCacheStats();
     } catch (err) {
-      // Ignore abort errors – they are intentional.
       if (err instanceof Error && err.name === "AbortError") return;
-      const errorText = err instanceof Error ? err.message : "Něco se nepodařilo.";
+      const errorText = err instanceof Error ? err.message : "Odpoved se nepodarilo sestavit.";
       setError(errorText);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createId(),
-          role: "assistant",
-          content: errorText,
-          created_at: new Date().toISOString()
-        }
-      ]);
+      setMessages((current) => [...current, { id: createId(), role: "assistant", content: errorText, created_at: new Date().toISOString() }]);
     } finally {
       setLoading(false);
     }
-  }
-
-  async function handleSend(event?: FormEvent) {
-    event?.preventDefault();
-    const text = message.trim() || userInfo.problem_summary?.trim() || "";
-    await submitMessage(text);
-  }
-
-  async function handleCareRequest(text: string) {
-    const fallback = buildCarePrompt(userInfo);
-    await submitMessage((text.trim() || fallback).trim());
   }
 
   async function handleIngest() {
@@ -369,7 +211,7 @@ function App() {
       await ingestData();
       await refreshStats();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Indexace se nepodařila.");
+      setError(err instanceof Error ? err.message : "Indexace se nepodarila.");
     } finally {
       setIndexing(false);
     }
@@ -377,306 +219,149 @@ function App() {
 
   function clearHistory() {
     setMessages([]);
-    setResponse(null);
     setLiveSteps(emptySteps);
   }
 
-  function clearPatientData() {
-    setUserInfo(defaultUser);
-  }
-
   async function copyHistory() {
-    const transcript = messages
-      .map((item) => `${item.role === "user" ? "Uživatel" : "Asistent"}: ${item.content}`)
-      .join("\n\n");
+    const transcript = messages.map((item) => `${item.role === "user" ? "Uzivatel" : "Asistent"}: ${item.content}`).join("\n\n");
     await navigator.clipboard?.writeText(transcript);
   }
 
   return (
-    <div className={`app-shell min-h-screen bg-mist text-ink transition-colors dark:bg-slate-950 dark:text-slate-100 ${fontScaleClass}`}>
-      <header className="app-header sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <XdentLogo />
-            <div>
-              <h1 className="text-xl font-semibold">XDENT Recepce</h1>
-              <p className="text-sm text-slate-500">Pacientská triáž a operátorský pult nad transkripcemi</p>
-            </div>
-          </div>
-
-          <nav className="flex flex-wrap items-center gap-2">
-            <TabButton active={activeTab === "chat"} icon={<MessageSquare size={17} />} label="Chat" onClick={() => setActiveTab("chat")} />
-            <TabButton active={activeTab === "faq"} icon={<Star size={17} />} label="Časté dotazy" onClick={() => setActiveTab("faq")} />
-            <TabButton active={activeTab === "history"} icon={<History size={17} />} label="Historie" onClick={() => setActiveTab("history")} />
-          </nav>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusPill icon={<Database size={16} />} label={isIndexed ? `${stats?.points_count} chunků` : "Index prázdný"} ok={isIndexed} />
-            <StatusPill icon={<ShieldCheck size={16} />} label={stats?.api_ready ? "Model ready" : "Chybí klíč"} ok={Boolean(stats?.api_ready)} />
-            <AppearanceControls
-              themeMode={themeMode}
-              fontSizeMode={fontSizeMode}
-              onThemeModeChange={setThemeMode}
-              onFontSizeModeChange={setFontSizeMode}
-            />
-            <button className="icon-button" onClick={() => { void refreshStats(); void refreshCacheStats(); }} title="Obnovit stav">
-              <RefreshCw size={18} />
-            </button>
-            <button className="primary-button" onClick={handleIngest} disabled={indexing || !stats?.api_ready}>
-              {indexing ? <Loader2 className="animate-spin" size={17} /> : <Zap size={17} />}
-              {isIndexed ? "Přeindexovat" : "Indexovat"}
-            </button>
-          </div>
+    <div className="xdent-widget-page">
+      <div className="xdent-widget-background">
+        <XdentLogo />
+        <div>
+          <h1>XDENT chat asistent</h1>
+          <p>Minimalni podpora nad transkripcemi, pripravena jako vlozitelny chat widget.</p>
         </div>
-      </header>
-
-      {activeTab === "chat" && (
-        <>
-        <main className="mx-auto grid max-w-[1600px] gap-5 px-5 py-5 xl:grid-cols-[minmax(0,2.35fr)_340px]">
-          <section className="space-y-5">
-            <IndexBanner stats={stats} isIndexed={isIndexed} indexing={indexing} />
-
-            <section className="panel flex h-[820px] min-h-0 flex-col xl:h-[calc(100vh-142px)] xl:max-h-[980px]">
-              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <PanelTitle icon={<MessageSquare size={19} />} title="Konverzace" subtitle={`${messages.length} zpráv v relaci`} />
-                <div className="flex items-center gap-2">
-                  {isSpeaking && (
-                    <button
-                      className="flex items-center gap-1 rounded-md border border-mint/40 bg-mint/10 px-2 py-1 text-xs text-mint"
-                      onClick={stopSpeaking}
-                      title="Zastavit přehrávání"
-                    >
-                      <Volume2 size={13} className="animate-pulse" />
-                      Zastavit
-                    </button>
-                  )}
-                  <div className="flex items-center gap-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                    <Clock3 size={15} />
-                    {sessionId.slice(0, 8)}
-                  </div>
-                </div>
-              </div>
-
-              <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-                {messages.length === 0 && <WelcomeBlock voiceOutputEnabled={voiceOutputEnabled} />}
-                {messages.map((item) => (
-                  <ChatBubble key={item.id} message={item} />
-                ))}
-                {loading && <PendingBubble steps={liveSteps} />}
-                <div ref={messagesEndRef} />
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {demoQuestions.map((question) => (
-                  <button key={question} className="sample-chip" onClick={() => setMessage(question)}>
-                    {question}
-                  </button>
-                ))}
-              </div>
-
-              <form className="mt-4 flex flex-col gap-3 md:flex-row" onSubmit={handleSend}>
-                <div className="relative flex-1">
-                  <textarea
-                    className="field-input min-h-24 w-full resize-none"
-                    value={message}
-                    onChange={(event) => setMessage(event.target.value)}
-                    onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-                      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                        event.preventDefault();
-                        void handleSend();
-                      }
-                    }}
-                    placeholder="Detail dotazu nebo doplnění k problému pacienta… (Ctrl+Enter odešle)"
-                    maxLength={4000}
-                  />
-                  <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-slate-400">
-                    {message.length}/4000
-                  </span>
-                </div>
-                <div className="flex gap-2 md:flex-col">
-                  {voiceInputSupported && (
-                    <button
-                      type="button"
-                      className={`flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                        isListening
-                          ? "animate-pulse border-red-300 bg-red-50 text-red-600"
-                          : "border-slate-200 bg-white text-slate-600 hover:border-mint hover:text-mint"
-                      }`}
-                      onClick={isListening ? stopListening : startListening}
-                      title={isListening ? "Zastavit nahrávání" : "Zadat hlasem (cs-CZ)"}
-                    >
-                      {isListening ? <MicOff size={17} /> : <Mic size={17} />}
-                      {isListening ? "Nahrávám…" : "Hlasem"}
-                    </button>
-                  )}
-                  <button
-                    className="primary-button h-auto min-h-12 md:w-40"
-                    type="submit"
-                    disabled={loading || !isIndexed || !(message.trim() || userInfo.problem_summary?.trim())}
-                  >
-                    {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
-                    Odeslat
-                  </button>
-                </div>
-              </form>
-
-              {error && (
-                <div className="mt-4 flex gap-2 rounded-md border border-coral/30 bg-coral/10 p-3 text-sm text-coral">
-                  <AlertTriangle size={18} />
-                  <span>{error}</span>
-                </div>
-              )}
-            </section>
-
-            <EvidencePanel response={visibleResponse} loading={loading} sources={sources} topScore={topScore} />
-          </section>
-
-          <aside className="space-y-5">
-            <PatientPanel userInfo={userInfo} onChange={setUserInfo} onClear={clearPatientData} />
-            <RetrievalPanel
-              strictMode={strictMode}
-              onStrictModeChange={setStrictMode}
-              retrievalTolerance={retrievalTolerance}
-              onRetrievalToleranceChange={setRetrievalTolerance}
-            />
-            <VoicePanel
-              voiceInputSupported={voiceInputSupported}
-              voiceOutputSupported={voiceOutputSupported}
-              voiceOutputEnabled={voiceOutputEnabled}
-              voiceLanguage={voiceLanguage}
-              voices={ttsVoices}
-              selectedVoiceURI={preferredVoiceURI}
-              selectedVoiceName={selectedVoice?.name ?? null}
-              onVoiceOutputChange={setVoiceOutputEnabled}
-              onVoiceLanguageChange={setVoiceLanguage}
-              onVoiceURIChange={setPreferredVoiceURI}
-              isListening={isListening}
-              isSpeaking={isSpeaking}
-              onStartListening={startListening}
-              onStopListening={stopListening}
-              onStopSpeaking={stopSpeaking}
-            />
-            <AgentPanel steps={steps} loading={loading} />
-            <CarePanel
-              response={visibleResponse}
-              userInfo={userInfo}
-              loading={loading}
-              isIndexed={isIndexed}
-              onSubmit={handleCareRequest}
-            />
-            <CoveragePanel topicCoverage={topicCoverage} />
-            <EscalationPanel response={visibleResponse} />
-          </aside>
-        </main>
-        <ClinicMapSection clinics={mapClinics} response={visibleResponse} />
-        <BottomWorkflowBar
-          response={visibleResponse}
-          cacheStats={cacheStats}
-          userInfo={userInfo}
-          onCareSubmit={handleCareRequest}
-          onShowFaq={() => setActiveTab("faq")}
-          onShowHistory={() => setActiveTab("history")}
-        />
-        </>
-      )}
-
-      {activeTab === "faq" && (
-        <FaqView
-          cacheStats={cacheStats}
-          onRefreshCache={refreshCacheStats}
-          onAsk={(query) => {
-            setMessage(query);
-            setActiveTab("chat");
-          }}
-        />
-      )}
-
-      {activeTab === "history" && (
-        <HistoryView
-          messages={messages}
-          onClear={clearHistory}
-          onCopy={copyHistory}
-          sessionId={sessionId}
-          cacheStats={cacheStats}
-          onRefreshCache={refreshCacheStats}
-        />
-      )}
-    </div>
-  );
-}
-
-// ── helpers ────────────────────────────────────────────────────────────────
-
-function mergeStep(current: AgentStep[], next: AgentStep): AgentStep[] {
-  const exists = current.some((step) => step.id === next.id);
-  if (!exists) return [...current, next];
-  return current.map((step) => (step.id === next.id ? { ...step, ...next } : step));
-}
-
-function sourcesFromSteps(steps: AgentStep[]): Source[] {
-  const retrieveStep = steps.find((step) => step.id === "retrieve");
-  const payloadSources = retrieveStep?.payload?.sources;
-  return Array.isArray(payloadSources) ? (payloadSources as Source[]) : [];
-}
-
-function getFrequentQuestions(cacheStats: CacheStats | null): Array<{ query: string; count: number }> {
-  const fromStats = (cacheStats?.top_frequent ?? [])
-    .filter((item) => item.query.trim())
-    .sort((left, right) => right.count - left.count);
-  if (fromStats.length > 0) return fromStats;
-  return [
-    { query: "Nejde odeslat eRecept nebo ePoukaz, co mam zkontrolovat?", count: 18 },
-    { query: "Jak opravit prihlaseni po instalaci certifikatu?", count: 14 },
-    { query: "Kde v kalendari zmenim nebo presunu termin pacienta?", count: 11 },
-    { query: "Proc se dokument netiskne spravne a jak upravit sablonu?", count: 9 },
-    { query: "Jak najit nejdrivejsi termin pro akutniho pacienta?", count: 7 },
-    { query: "Ktera ordinace prijima nove pacienty na dentalni hygienu?", count: 6 }
-  ];
-}
-
-// ── components ─────────────────────────────────────────────────────────────
-
-function IndexBanner({ stats, isIndexed, indexing }: { stats: StatsResponse | null; isIndexed: boolean; indexing: boolean }) {
-  if (isIndexed) {
-    return (
-      <div className="success-banner">
-        <CheckCircle2 size={19} />
-        Index je připravený. Chat může odpovídat nad transkripcemi.
       </div>
-    );
-  }
 
-  return (
-    <div className="warning-banner">
-      <AlertTriangle size={19} />
-      {indexing
-        ? "Probíhá indexace transkripcí."
-        : stats?.api_ready
-          ? "Index je prázdný."
-          : "Chybí OPENAI_API_KEY v .env."}
+      {open && (
+        <section className="xdent-chat-popup" aria-label="XDENT chat">
+          <header className="xdent-chat-header">
+            <div className="flex min-w-0 items-center gap-3">
+              <XdentLogo small />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">XDENT asistent</div>
+                <div className="truncate text-xs text-white/75">{isIndexed ? `${stats?.points_count ?? 0} chunku v indexu` : "Index neni pripraveny"}</div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button className="xdent-header-button" onClick={() => { void refreshStats(); void refreshCacheStats(); }} title="Obnovit stav">
+                <RefreshCw size={15} />
+              </button>
+              <button className="xdent-header-button" onClick={() => setOpen(false)} title="Zavrit chat">
+                <X size={16} />
+              </button>
+            </div>
+          </header>
+
+          <div className="xdent-chat-status">
+            <StatusChip ok={isIndexed} icon={<Database size={14} />} label={isIndexed ? "Index pripraven" : "Index prazdny"} />
+            {topFrequent && <span className="truncate text-xs text-slate-500">Casto: {topFrequent}</span>}
+          </div>
+
+          {!isIndexed && (
+            <div className="mx-4 mt-3 rounded-md border border-amber/30 bg-amber/10 p-3 text-sm text-amber">
+              Nejdrive vytvorte index transkripci.
+              <button className="primary-button mt-3 w-full" onClick={handleIngest} disabled={indexing || !stats?.api_ready}>
+                {indexing ? <Loader2 className="animate-spin" size={16} /> : <Zap size={16} />}
+                Indexovat
+              </button>
+            </div>
+          )}
+
+          <div className="xdent-chat-messages thin-scroll">
+            {messages.length === 0 && <WelcomeBlock voiceOutputEnabled={voiceOutputEnabled} />}
+            {messages.map((item) => <ChatBubble key={item.id} message={item} />)}
+            {loading && <PendingBubble steps={visibleSteps} />}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {error && (
+            <div className="mx-4 mb-3 flex gap-2 rounded-md border border-coral/30 bg-coral/10 p-3 text-sm text-coral">
+              <AlertTriangle size={17} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <div className="xdent-chat-samples">
+            {demoQuestions.slice(0, 3).map((question) => (
+              <button key={question} className="sample-chip" onClick={() => setMessage(question)}>
+                {question}
+              </button>
+            ))}
+          </div>
+
+          <form className="xdent-chat-input" onSubmit={handleSend}>
+            <textarea
+              className="field-input min-h-20 resize-none"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  void handleSend();
+                }
+              }}
+              placeholder="Napiste dotaz k XDENTu..."
+              maxLength={4000}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {voiceInputSupported && (
+                  <button type="button" className={`icon-button ${isListening ? "text-coral" : ""}`} onClick={isListening ? stopListening : startListening} title="Mikrofon pouze cesky (cs-CZ)">
+                    {isListening ? <MicOff size={17} /> : <Mic size={17} />}
+                  </button>
+                )}
+                {voiceOutputSupported && (
+                  <button type="button" className="icon-button" onClick={() => voiceOutputEnabled ? setVoiceOutputEnabled(false) : setVoiceOutputEnabled(true)} title="Cist odpovedi cesky">
+                    {voiceOutputEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
+                  </button>
+                )}
+                <button type="button" className="icon-button" onClick={copyHistory} title="Kopirovat historii" disabled={messages.length === 0}>
+                  <Copy size={17} />
+                </button>
+                <button type="button" className="icon-button" onClick={clearHistory} title="Vymazat historii" disabled={messages.length === 0}>
+                  <Trash2 size={17} />
+                </button>
+              </div>
+              <button className="primary-button" type="submit" disabled={loading || !isIndexed || !message.trim()}>
+                {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
+                Odeslat
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      <button className="xdent-chat-launcher" onClick={() => setOpen((value) => !value)} aria-label={open ? "Zavrit chat" : "Otevrit chat"}>
+        {open ? <X size={26} /> : <MessageSquare size={27} />}
+      </button>
     </div>
   );
 }
 
-function XdentLogo() {
+function XdentLogo({ small = false }: { small?: boolean }) {
   return (
-    <div className="logo-mark" aria-label="XDENT">
-      <span className="logo-x">X</span>
-      <span className="logo-dent">DENT</span>
+    <div className={`logo-mark ${small ? "h-10 w-10" : ""}`} aria-label="XDENT">
+      <span className={small ? "relative z-10 text-xl font-black leading-4" : "logo-x"}>X</span>
+      <span className={small ? "relative z-10 mt-0.5 text-[8px] font-black leading-none tracking-wide" : "logo-dent"}>DENT</span>
     </div>
   );
 }
 
 function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
   return (
-    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-5">
+    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4">
       <div className="mb-2 flex items-center gap-2 font-semibold">
         <CheckCircle2 size={18} />
-        Připraveno na dotaz
+        Pripraveno na dotaz
       </div>
       <p className="text-sm leading-6 text-slate-600">
-        Asistent vrací krátkou odpověď, zdroje z transkripcí, téma, jistotu a eskalační balíček.
-        {voiceOutputEnabled && " Hlasový výstup je zapnutý – odpovědi budou přečteny."}
+        Asistent odpovida kratce podle zdroju z transkripci. V odpovedi uvidite i silu zdroje.
+        {voiceOutputEnabled && " Hlasovy vystup je zapnuty a cte cesky."}
       </p>
     </div>
   );
@@ -685,33 +370,38 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
+  const sourceStrength = sourceStrengthPercent(message.response?.sources ?? []);
 
   async function copyContent() {
     await navigator.clipboard?.writeText(message.content);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => setCopied(false), 1400);
   }
 
   return (
     <article className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"} group relative`}>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-          <span className="font-semibold">{isUser ? "Uživatel" : message.response?.topic_label ?? "Asistent"}</span>
+          <span className="font-semibold">{isUser ? "Vy" : message.response?.topic_label ?? "XDENT asistent"}</span>
           <div className="flex items-center gap-2">
             <span className={isUser ? "text-white/70" : "text-slate-400"}>{formatTime(message.created_at)}</span>
-            <button
-              className={`opacity-0 transition-opacity group-hover:opacity-100 ${isUser ? "text-white/70 hover:text-white" : "text-slate-400 hover:text-slate-600"}`}
-              onClick={copyContent}
-              title="Kopírovat zprávu"
-            >
+            <button className={`opacity-0 transition-opacity group-hover:opacity-100 ${isUser ? "text-white/70 hover:text-white" : "text-slate-400 hover:text-slate-600"}`} onClick={copyContent} title="Kopirovat zpravu">
               {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
             </button>
           </div>
         </div>
         <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
         {!isUser && message.response && (
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">jistota {Math.round(message.response.confidence * 100)} %</span>
+          <div className="mt-3 grid gap-2 text-xs">
+            <div className="rounded-md bg-white/70 p-2 text-slate-600">
+              <div className="mb-1 flex items-center justify-between">
+                <span>Sila zdroje</span>
+                <span className="font-semibold text-ink">{sourceStrength}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-200">
+                <div className="h-1.5 rounded-full bg-mint" style={{ width: `${sourceStrength}%` }} />
+              </div>
+            </div>
             <SourceDisclosure sources={message.response.sources} />
           </div>
         )}
@@ -722,16 +412,16 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 
 function SourceDisclosure({ sources }: { sources: Source[] }) {
   if (sources.length === 0) {
-    return <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">0 zdrojů</span>;
+    return <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">0 zdroju</span>;
   }
 
   return (
-    <details className="w-full rounded-md bg-white/70 px-2 py-1 text-slate-600 md:w-auto">
+    <details className="rounded-md bg-white/70 px-2 py-1 text-slate-600">
       <summary className="cursor-pointer list-none select-none">
-        {sources.length} zdrojů
+        {sources.length} zdroju
       </summary>
-      <div className="mt-2 grid gap-2 md:min-w-80">
-        {sources.map((source, index) => (
+      <div className="mt-2 grid gap-2">
+        {sources.slice(0, 3).map((source, index) => (
           <div key={`${source.source}-${index}`} className="rounded-md border border-slate-200 bg-white p-2">
             <div className="mb-1 flex items-center justify-between gap-2">
               <span className="truncate font-semibold">{index + 1}. {source.source}</span>
@@ -761,926 +451,25 @@ function PendingBubble({ steps }: { steps: AgentStep[] }) {
   );
 }
 
-function PatientPanel({
-  userInfo,
-  onChange,
-  onClear
-}: {
-  userInfo: UserInfo;
-  onChange: (value: UserInfo) => void;
-  onClear: () => void;
-}) {
-  function update(field: keyof UserInfo, value: string) {
-    onChange({ ...userInfo, [field]: value });
-  }
-
+function StatusChip({ icon, label, ok }: { icon: ReactNode; label: string; ok: boolean }) {
   return (
-    <CollapsiblePanel
-      icon={<User size={19} />}
-      title="Pacient / pripad"
-      subtitle="Uklada se lokalne v prohlizeci"
-      defaultOpen
-      action={
-        <button className="icon-button h-9 w-9" onClick={onClear} title="Vymazat data pacienta">
-          <Trash2 size={16} />
-        </button>
-      }
-    >
-      <div className="hidden">
-        <PanelTitle icon={<User size={19} />} title="Pacient / případ" subtitle="Ukládá se lokálně v prohlížeči" />
-        <button className="icon-button h-9 w-9" onClick={onClear} title="Vymazat data pacienta">
-          <Trash2 size={16} />
-        </button>
-      </div>
-      <div className="grid gap-3">
-        <Input label="Pacient" value={userInfo.patient_name ?? ""} onChange={(value) => update("patient_name", value)} />
-        <Input label="Číslo karty / ID" value={userInfo.patient_identifier ?? ""} onChange={(value) => update("patient_identifier", value)} />
-        <Input label="Věk / rok narození" value={userInfo.patient_age ?? ""} onChange={(value) => update("patient_age", value)} />
-        <div className="grid gap-3 md:grid-cols-2">
-          <Input label="Mesto pacienta" value={userInfo.patient_city ?? ""} onChange={(value) => update("patient_city", value)} />
-          <Input label="Adresa / oblast" value={userInfo.patient_address ?? ""} onChange={(value) => update("patient_address", value)} />
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Input label="Telefon pacienta" value={userInfo.patient_phone ?? ""} onChange={(value) => update("patient_phone", value)} />
-          <Input label="E-mail pacienta" value={userInfo.patient_email ?? ""} onChange={(value) => update("patient_email", value)} />
-        </div>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Preferovany kontakt</span>
-          <select
-            className="field-input h-10"
-            value={userInfo.preferred_contact_method ?? "any"}
-            onChange={(event) => update("preferred_contact_method", event.target.value)}
-          >
-            <option value="any">Podle dostupnosti</option>
-            <option value="phone">Telefon</option>
-            <option value="sms">SMS</option>
-            <option value="email">E-mail</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Urgence</span>
-          <select className="field-input h-10" value={userInfo.urgency ?? "normal"} onChange={(event) => update("urgency", event.target.value)}>
-            <option value="low">Nízká</option>
-            <option value="normal">Běžná</option>
-            <option value="high">Vysoká</option>
-            <option value="critical">Kritická</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Konkrétní problém</span>
-          <textarea
-            className="field-input min-h-24 resize-none"
-            value={userInfo.problem_summary ?? ""}
-            onChange={(event) => update("problem_summary", event.target.value)}
-            placeholder="Např. u pacienta nejde vystavit ePoukaz, systém hlásí chybu úhrady..."
-            maxLength={1200}
-          />
-        </label>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Input label="Ordinace" value={userInfo.clinic ?? ""} onChange={(value) => update("clinic", value)} />
-          <Input label="Kontakt" value={userInfo.contact ?? ""} onChange={(value) => update("contact", value)} />
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Input label="Operátor" value={userInfo.name ?? ""} onChange={(value) => update("name", value)} />
-          <Input label="Verze XDENT" value={userInfo.software_version ?? ""} onChange={(value) => update("software_version", value)} />
-        </div>
-      </div>
-    </CollapsiblePanel>
-  );
-}
-
-function RetrievalPanel({
-  strictMode,
-  onStrictModeChange,
-  retrievalTolerance,
-  onRetrievalToleranceChange
-}: {
-  strictMode: boolean;
-  onStrictModeChange: (value: boolean) => void;
-  retrievalTolerance: RetrievalTolerance;
-  onRetrievalToleranceChange: (value: RetrievalTolerance) => void;
-}) {
-  return (
-    <CollapsiblePanel icon={<SlidersHorizontal size={19} />} title="Hledani" subtitle="Tolerance v chuncich" defaultOpen={false}>
-      <div className="hidden" />
-      <div className="grid grid-cols-3 gap-2">
-        {toleranceOptions.map((option) => (
-          <button
-            key={option.value}
-            className={`mode-button ${retrievalTolerance === option.value ? "mode-button-active" : ""}`}
-            onClick={() => onRetrievalToleranceChange(option.value)}
-            title={option.hint}
-          >
-            <span>{option.label}</span>
-            <small>{option.hint}</small>
-          </button>
-        ))}
-      </div>
-      <label className="mt-4 flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-        Strict mode
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-slate-300 text-mint focus:ring-mint"
-          checked={strictMode}
-          onChange={(event) => onStrictModeChange(event.target.checked)}
-        />
-      </label>
-    </CollapsiblePanel>
-  );
-}
-
-function VoicePanel({
-  voiceInputSupported,
-  voiceOutputSupported,
-  voiceOutputEnabled,
-  voiceLanguage,
-  voices,
-  selectedVoiceURI,
-  selectedVoiceName,
-  onVoiceOutputChange,
-  onVoiceLanguageChange,
-  onVoiceURIChange,
-  isListening,
-  isSpeaking,
-  onStartListening,
-  onStopListening,
-  onStopSpeaking
-}: {
-  voiceInputSupported: boolean;
-  voiceOutputSupported: boolean;
-  voiceOutputEnabled: boolean;
-  voiceLanguage: VoiceLanguage;
-  voices: SpeechSynthesisVoice[];
-  selectedVoiceURI: string;
-  selectedVoiceName: string | null;
-  onVoiceOutputChange: (v: boolean) => void;
-  onVoiceLanguageChange: (v: VoiceLanguage) => void;
-  onVoiceURIChange: (v: string) => void;
-  isListening: boolean;
-  isSpeaking: boolean;
-  onStartListening: () => void;
-  onStopListening: () => void;
-  onStopSpeaking: () => void;
-}) {
-  const sortedVoices = sortVoices(voices, voiceLanguage);
-
-  return (
-    <CollapsiblePanel icon={<Mic size={19} />} title="Hlas" subtitle="Vstup a cteni odpovedi" defaultOpen={false}>
-      <div className="space-y-3">
-        {/* Voice input */}
-        <div className="rounded-md border border-slate-200 bg-white p-3">
-          <div className="mb-2 flex items-center justify-between text-xs font-medium uppercase text-slate-400">
-            <span>Vstup (mikrofon)</span>
-            {voiceInputSupported
-              ? <span className="rounded-md bg-mint/10 px-1.5 py-0.5 text-mint">k dispozici</span>
-              : <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-500">nepodporováno</span>}
-          </div>
-          {voiceInputSupported ? (
-            <button
-              className={`w-full rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                isListening
-                  ? "animate-pulse border-red-300 bg-red-50 text-red-600"
-                  : "border-slate-200 bg-slate-50 text-slate-600 hover:border-mint hover:text-mint"
-              }`}
-              onClick={isListening ? onStopListening : onStartListening}
-            >
-              <span className="flex items-center justify-center gap-2">
-                {isListening ? <><MicOff size={15} /> Zastavit nahrávání</> : <><Mic size={15} /> Mluvit</>}
-              </span>
-            </button>
-          ) : (
-            <p className="text-xs text-slate-500">Prohlížeč nepodporuje Web Speech API.</p>
-          )}
-        </div>
-
-        {/* Voice output */}
-        <div className="rounded-md border border-slate-200 bg-white p-3">
-          <div className="mb-2 flex items-center justify-between text-xs font-medium uppercase text-slate-400">
-            <span>Výstup (TTS)</span>
-            {voiceOutputSupported
-              ? <span className="rounded-md bg-mint/10 px-1.5 py-0.5 text-mint">k dispozici</span>
-              : <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-500">nepodporováno</span>}
-          </div>
-          {voiceOutputSupported ? (
-            <div className="space-y-2">
-              <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-slate-600">
-                Automaticky číst odpovědi
-                <button
-                  type="button"
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${voiceOutputEnabled ? "bg-mint" : "bg-slate-200"}`}
-                  onClick={() => onVoiceOutputChange(!voiceOutputEnabled)}
-                  role="switch"
-                  aria-checked={voiceOutputEnabled}
-                >
-                  <span className={`inline-block h-4 w-4 translate-x-1 rounded-full bg-white shadow transition-transform ${voiceOutputEnabled ? "translate-x-6" : ""}`} />
-                </button>
-              </label>
-              <div>
-                <div className="mb-2 text-xs font-medium uppercase text-slate-400">Jazyk hlasu</div>
-                <div className="grid grid-cols-3 gap-2">
-                  {voiceLanguageOptions.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`mode-button min-h-12 ${voiceLanguage === option.value ? "mode-button-active" : ""}`}
-                      onClick={() => {
-                        onVoiceLanguageChange(option.value);
-                        onVoiceURIChange("");
-                      }}
-                    >
-                      <span>{option.label}</span>
-                      <small>{option.hint}</small>
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-2 truncate text-xs text-slate-500">
-                  Vybraný hlas: {selectedVoiceName ?? "výchozí hlas prohlížeče"}
-                </div>
-              </div>
-              <label className="mt-3 block">
-                <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Konkretni hlas</span>
-                <select
-                  className="field-input h-10"
-                  value={selectedVoiceURI}
-                  onChange={(event) => onVoiceURIChange(event.target.value)}
-                >
-                  <option value="">Automaticky vybrat nejlepsi</option>
-                  {sortedVoices.map((voice) => (
-                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                      {voice.name} ({voice.lang})
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {isSpeaking && (
-                <button
-                  className="flex w-full items-center justify-center gap-2 rounded-md border border-mint/40 bg-mint/10 px-3 py-1.5 text-xs text-mint"
-                  onClick={onStopSpeaking}
-                >
-                  <Volume2 size={13} className="animate-pulse" /> Zastavit přehrávání
-                </button>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-500">Prohlížeč nepodporuje SpeechSynthesis.</p>
-          )}
-        </div>
-      </div>
-    </CollapsiblePanel>
-  );
-}
-
-function AgentPanel({ steps, loading }: { steps: AgentStep[]; loading: boolean }) {
-  return (
-    <CollapsiblePanel icon={<Activity size={19} />} title="Prubeh agenta" subtitle="Realtime stav" defaultOpen={false}>
-      <div className="hidden" />
-      <div className="space-y-3">
-        {steps.map((step, index) => (
-          <StepItem key={step.id} step={step} index={index} active={loading && step.status === "running"} />
-        ))}
-      </div>
-    </CollapsiblePanel>
-  );
-}
-
-function CarePanel({
-  response,
-  userInfo,
-  loading,
-  isIndexed,
-  onSubmit
-}: {
-  response: ChatResponse | null;
-  userInfo: UserInfo;
-  loading: boolean;
-  isIndexed: boolean;
-  onSubmit: (text: string) => void;
-}) {
-  const triage = response?.triage ?? null;
-  const appointment = response?.appointment ?? null;
-  const clinics = response?.clinics ?? [];
-  const [draft, setDraft] = useState(() => buildCarePrompt(userInfo));
-
-  function submitCare(event?: FormEvent) {
-    event?.preventDefault();
-    onSubmit(draft);
-  }
-
-  const quickPrompts = [
-    "Najdi nejdrivejsi akutni termin pro bolest zubu.",
-    "Najdi nejdrivejsi termin na dentalni hygienu.",
-    "Najdi ordinaci pobliz, ktera prijima nove pacienty."
-  ];
-
-  return (
-    <CollapsiblePanel icon={<CalendarCheck size={19} />} title="Pacientsky agent" subtitle="Napiste mu, co ma najit" defaultOpen>
-      <form className="mb-4 space-y-3" onSubmit={submitCare}>
-        <textarea
-          className="field-input min-h-24 resize-none"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Napriklad: pacient ma silnou bolest, je v Brne, najdi nejdrivejsi termin a ordinaci, ktera prijima nove pacienty."
-        />
-        <div className="flex flex-wrap gap-2">
-          {quickPrompts.map((prompt) => (
-            <button key={prompt} type="button" className="sample-chip" onClick={() => setDraft(prompt)}>
-              {prompt}
-            </button>
-          ))}
-        </div>
-        <button className="primary-button w-full" type="submit" disabled={loading || !isIndexed}>
-          {loading ? <Loader2 className="animate-spin" size={17} /> : <CalendarPlus size={17} />}
-          Najit nejdrivejsi terminy
-        </button>
-      </form>
-
-      {triage && (
-        <div className={`mb-3 rounded-md border p-3 ${triage.urgency === "critical" ? "border-coral/30 bg-coral/10" : triage.urgency === "high" ? "border-amber/30 bg-amber/10" : "border-mint/30 bg-mint/10"}`}>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-semibold text-ink">{triage.label} urgence</span>
-            <span className="rounded-md bg-white/70 px-2 py-1 text-xs text-slate-600">{Math.round(triage.confidence * 100)} %</span>
-          </div>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{triage.recommendation}</p>
-        </div>
-      )}
-
-      {appointment && (
-        <div className="mb-3 rounded-md border border-mint/30 bg-mint/10 p-3">
-          <div className="mb-1 text-sm font-semibold text-ink">
-            {appointment.status === "pre_reserved" ? "Predrezervovano" : "Ceka na kontakt"}
-          </div>
-          <div className="text-sm leading-6 text-slate-600">
-            {appointment.clinic_name && <div>{appointment.clinic_name}</div>}
-            {appointment.slot_start && <div>Nejdrive: {appointment.slot_start}</div>}
-            {appointment.reservation_id && <div>Kod: {appointment.reservation_id}</div>}
-            <div>{appointment.message}</div>
-          </div>
-        </div>
-      )}
-
-      <div className="space-y-2">
-        {clinics.length === 0 && <EmptyState text="Po odeslani se zde ukazou doporucene terminy." />}
-        {clinics.slice(0, 4).map((clinic, index) => (
-          <ClinicSlotCard key={`${clinic.name}-${index}`} clinic={clinic} rank={index + 1} compact />
-        ))}
-      </div>
-    </CollapsiblePanel>
-  );
-}
-
-function ClinicSlotCard({ clinic, rank, compact = false }: { clinic: ClinicOption; rank: number; compact?: boolean }) {
-  const services = clinic.services ?? [];
-
-  return (
-    <article className={`clinic-slot-card ${compact ? "p-3" : "p-4"}`}>
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-mint/10 text-xs text-mint">{rank}</span>
-            <span className="truncate">{clinic.name}</span>
-          </div>
-          <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-            <MapPin size={13} /> {clinic.city}{clinic.distance_km !== null && clinic.distance_km !== undefined ? `, ${clinic.distance_km} km` : ""}
-          </div>
-        </div>
-        <span className={`shrink-0 rounded-md px-2 py-1 text-xs ${clinic.accepting_new_patients ? "bg-mint/10 text-mint" : "bg-amber/10 text-amber"}`}>
-          {clinic.accepting_new_patients ? "nabira" : "po domluve"}
-        </span>
-      </div>
-      <div className="mb-2 flex flex-wrap gap-1">
-        {services.map((service) => (
-          <span key={service} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] text-slate-600">{service}</span>
-        ))}
-      </div>
-      <div className="space-y-1 text-xs text-slate-500">
-        <div className="flex items-center gap-2"><CalendarCheck size={13} /> {clinic.earliest_slot ?? "termin neni znamy"}</div>
-        <div className="flex items-center gap-2"><Phone size={13} /> {clinic.phone}</div>
-        {!compact && <div className="flex items-center gap-2"><Mail size={13} /> {clinic.email}</div>}
-      </div>
-    </article>
-  );
-}
-
-function EvidencePanel({
-  response,
-  loading,
-  sources,
-  topScore
-}: {
-  response: ChatResponse | null;
-  loading: boolean;
-  sources: Source[];
-  topScore: number;
-}) {
-  const confidence = Math.round((response?.confidence ?? 0) * 100);
-  const scoreWidth = Math.min(100, Math.round(topScore * 100));
-
-  return (
-    <section className="panel">
-      <PanelTitle icon={<FileSearch size={19} />} title="Relevantní informace" subtitle="Zdroje a signály" />
-      <div className="grid gap-3 md:grid-cols-3">
-        <Metric label="Téma" value={response?.topic_label ?? (loading ? "počítám" : "bez dotazu")} />
-        <Metric label="Jistota tématu" value={`${confidence} %`} bar={confidence} />
-        <Metric label="Síla zdroje" value={topScore ? `${topScore}` : "bez zdroje"} bar={scoreWidth} />
-      </div>
-
-      <div className="mt-4 grid gap-3">
-        {sources.length === 0 && <EmptyState text="Zdroje se zobrazí po odpovědi asistenta." />}
-        {sources.map((source, index) => (
-          <SourceCard key={`${source.source}-${index}`} source={source} index={index} maxScore={topScore} />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function CoveragePanel({ topicCoverage }: { topicCoverage: Array<{ topic: string; label: string; chunks: number; width: number }> }) {
-  return (
-    <CollapsiblePanel icon={<Gauge size={19} />} title="Pokryti" subtitle="Temata v indexu" defaultOpen={false}>
-      <div className="hidden" />
-      <div className="space-y-3">
-        {topicCoverage.length === 0 && <EmptyState text="Po indexaci se zobrazí témata." />}
-        {topicCoverage.map((topic) => (
-          <div key={topic.topic}>
-            <div className="mb-1 flex justify-between gap-3 text-xs text-slate-500">
-              <span className="truncate">{topic.label}</span>
-              <span>{topic.chunks}</span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-100">
-              <div className="h-2 rounded-full bg-mint" style={{ width: `${topic.width}%` }} />
-            </div>
-          </div>
-        ))}
-      </div>
-    </CollapsiblePanel>
-  );
-}
-
-function EscalationPanel({ response }: { response: ChatResponse | null }) {
-  return (
-    <CollapsiblePanel icon={<ShieldCheck size={19} />} title="Eskalace" subtitle="Fallback vystup" defaultOpen={Boolean(response?.escalation_packet)}>
-      <div className="hidden" />
-      <pre className="thin-scroll max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
-        {response?.escalation_packet ?? "Bez eskalace."}
-      </pre>
-    </CollapsiblePanel>
-  );
-}
-
-function FaqView({
-  cacheStats,
-  onRefreshCache,
-  onAsk
-}: {
-  cacheStats: CacheStats | null;
-  onRefreshCache: () => void;
-  onAsk: (query: string) => void;
-}) {
-  const frequent = getFrequentQuestions(cacheStats);
-  return (
-    <main className="mx-auto max-w-7xl px-5 py-5">
-      <section className="panel">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-          <PanelTitle icon={<Star size={19} />} title="Nejcastejsi dotazy" subtitle="Serazeno podle poctu opakovani" />
-          <button className="icon-button" onClick={onRefreshCache} title="Obnovit dotazy">
-            <RefreshCw size={18} />
-          </button>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          {frequent.map((item, index) => (
-            <button
-              key={`${item.query}-${index}`}
-              className="faq-card"
-              type="button"
-              onClick={() => onAsk(item.query)}
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-mint/10 text-sm font-bold text-mint">
-                {index + 1}
-              </span>
-              <span className="min-w-0 text-left">
-                <span className="line-clamp-2 text-sm font-semibold text-ink">{item.query}</span>
-                <span className="mt-1 block text-xs text-slate-500">{item.count}x opakovano</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function HistoryView({
-  messages,
-  onClear,
-  onCopy,
-  sessionId,
-  cacheStats,
-  onRefreshCache
-}: {
-  messages: ChatMessage[];
-  onClear: () => void;
-  onCopy: () => void;
-  sessionId: string;
-  cacheStats: CacheStats | null;
-  onRefreshCache: () => void;
-}) {
-  const answered = messages.filter((item) => item.role === "assistant" && item.response).length;
-  const frequent = getFrequentQuestions(cacheStats);
-  return (
-    <main className="mx-auto max-w-7xl px-5 py-5">
-      <section className="panel">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-          <PanelTitle icon={<History size={19} />} title="Historie chatu" subtitle={`Relace ${sessionId.slice(0, 8)}`} />
-          <div className="flex gap-2">
-            <button className="icon-button" onClick={onCopy} title="Kopírovat historii" disabled={messages.length === 0}>
-              <Copy size={18} />
-            </button>
-            <button className="icon-button text-coral hover:border-coral hover:text-coral" onClick={onClear} title="Vymazat historii" disabled={messages.length === 0}>
-              <Trash2 size={18} />
-            </button>
-          </div>
-        </div>
-
-        <div className="mb-5 grid gap-3 md:grid-cols-3">
-          <Metric label="Zprávy" value={`${messages.length}`} />
-          <Metric label="Odpovědi" value={`${answered}`} />
-          <Metric label="Zdroje" value={`${messages.reduce((sum, item) => sum + (item.response?.sources.length ?? 0), 0)}`} />
-        </div>
-
-        <div className="space-y-3">
-          {messages.length === 0 && <EmptyState text="Historie je prázdná." />}
-          {messages.map((item) => (
-            <article key={item.id} className="rounded-md border border-slate-200 bg-white p-4">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                <span className="font-semibold text-ink">{item.role === "user" ? "Uživatel" : item.response?.topic_label ?? "Asistent"}</span>
-                <span>{formatTime(item.created_at)}</span>
-              </div>
-              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
-              {item.response && (
-                <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <SourceDisclosure sources={item.response.sources} />
-                  <span className="rounded-md bg-slate-100 px-2 py-1">tolerance: {toleranceName(item.response.retrieval_tolerance)}</span>
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-
-        <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-ink">Opakovane dotazy</div>
-              <div className="text-xs text-slate-500">Pomaha ladit znalostni vrstvu a odpovedi.</div>
-            </div>
-            <button className="icon-button h-9 w-9" onClick={onRefreshCache} title="Obnovit dotazy">
-              <RefreshCw size={15} />
-            </button>
-          </div>
-          {frequent.length === 0 ? (
-            <EmptyState text="Zatim bez opakovanych dotazu." />
-          ) : (
-            <div className="grid gap-2 md:grid-cols-2">
-              {frequent.slice(0, 6).map((item, index) => (
-                <div key={`${item.query}-${index}`} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
-                  <div className="line-clamp-2 text-slate-700">{item.query}</div>
-                  <div className="mt-2 text-xs font-semibold text-mint">{item.count}x</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-    </main>
-  );
-}
-
-// ── small shared components ────────────────────────────────────────────────
-
-function CollapsiblePanel({
-  icon,
-  title,
-  subtitle,
-  defaultOpen = false,
-  action,
-  children
-}: {
-  icon: ReactNode;
-  title: string;
-  subtitle: string;
-  defaultOpen?: boolean;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className="panel collapsible-panel">
-      <div className="flex items-center justify-between gap-3">
-        <button className="collapsible-trigger" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-          <span className="text-mint">{icon}</span>
-          <span className="min-w-0 text-left">
-            <span className="block text-base font-semibold text-ink">{title}</span>
-            <span className="mt-0.5 block truncate text-sm text-slate-500">{subtitle}</span>
-          </span>
-          <ChevronDown size={17} className={`ml-auto shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
-        </button>
-        {action}
-      </div>
-      {open && <div className="mt-4">{children}</div>}
-    </section>
-  );
-}
-
-function BottomWorkflowBar({
-  response,
-  cacheStats,
-  userInfo,
-  onCareSubmit,
-  onShowFaq,
-  onShowHistory
-}: {
-  response: ChatResponse | null;
-  cacheStats: CacheStats | null;
-  userInfo: UserInfo;
-  onCareSubmit: (text: string) => void;
-  onShowFaq: () => void;
-  onShowHistory: () => void;
-}) {
-  const frequent = getFrequentQuestions(cacheStats);
-  const topQuery = frequent[0]?.query ?? "Zatim sbirame dotazy";
-  const appointment = response?.appointment;
-  const contact = userInfo.patient_phone || userInfo.patient_email || userInfo.contact || "kontakt neni vyplnen";
-  return (
-    <section className="mx-auto max-w-[1600px] px-5 pb-4">
-      <div className="bottom-workflow-bar">
-        <WorkflowTile icon={<Star size={18} />} label="Nejcastejsi dotazy" value={topQuery} detail={`${frequent.length} dotazu podle opakovani`} onClick={onShowFaq} />
-        <WorkflowTile icon={<CalendarPlus size={18} />} label="Predobjednani" value={appointment?.slot_start ?? "najit nejblizsi termin"} detail={appointment?.reservation_id ?? "agent doporuci nejdrivejsi slot"} onClick={() => onCareSubmit(buildCarePrompt(userInfo))} />
-        <WorkflowTile icon={<Phone size={18} />} label="Kontakty" value={contact} detail={userInfo.patient_city || "doplnte mesto pacienta"} />
-        <WorkflowTile icon={<History size={18} />} label="Historie" value="otevrit konverzace" detail="chat history a zdroje" onClick={onShowHistory} />
-      </div>
-    </section>
-  );
-}
-
-function WorkflowTile({ icon, label, value, detail, onClick }: { icon: ReactNode; label: string; value: string; detail: string; onClick?: () => void }) {
-  const className = `workflow-tile ${onClick ? "cursor-pointer" : ""}`;
-  if (onClick) {
-    return (
-      <button className={className} onClick={onClick}>
-        <span className="workflow-tile-icon">{icon}</span>
-        <span className="min-w-0 text-left">
-          <span className="block text-xs font-semibold uppercase text-slate-400">{label}</span>
-          <span className="mt-1 block truncate text-sm font-semibold text-ink">{value}</span>
-          <span className="mt-1 block truncate text-xs text-slate-500">{detail}</span>
-        </span>
-      </button>
-    );
-  }
-  return (
-    <div className={className}>
-      <span className="workflow-tile-icon">{icon}</span>
-      <span className="min-w-0">
-        <span className="block text-xs font-semibold uppercase text-slate-400">{label}</span>
-        <span className="mt-1 block truncate text-sm font-semibold text-ink">{value}</span>
-        <span className="mt-1 block truncate text-xs text-slate-500">{detail}</span>
-      </span>
-    </div>
-  );
-}
-
-function ClinicMapSection({ clinics, response }: { clinics: ClinicOption[]; response: ChatResponse | null }) {
-  const visible = clinics.slice(0, 8);
-  return (
-    <section className="mx-auto grid max-w-[1600px] gap-5 px-5 pb-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-      <div className="panel">
-        <PanelTitle icon={<Map size={19} />} title="Mapa dostupnych ordinaci" subtitle="Zubni pece a dentalni hygiena" />
-        <div className="clinic-map">
-          {visible.map((clinic, index) => (
-            <div
-              key={`${clinic.name}-${index}`}
-              className={`map-pin ${clinic.accepting_new_patients ? "map-pin-open" : "map-pin-limited"}`}
-              style={{ left: `${clinic.map_x ?? 50}%`, top: `${clinic.map_y ?? 50}%` }}
-              title={`${clinic.name} - ${clinic.city}`}
-            >
-              <span>{index + 1}</span>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-          <span className="inline-flex items-center gap-1"><span className="legend-dot bg-mint" /> nabira nove pacienty</span>
-          <span className="inline-flex items-center gap-1"><span className="legend-dot bg-amber" /> jen po domluve</span>
-          <span>{response?.appointment ? `Predrezervace: ${response.appointment.reservation_id ?? response.appointment.status}` : "Vyberte pacienta a nechte agenta najit terminy."}</span>
-        </div>
-      </div>
-      <div className="panel">
-        <PanelTitle icon={<Building2 size={19} />} title="Ordinace a hygiena" subtitle="Dostupnost podle demo adresare" />
-        <div className="thin-scroll max-h-80 space-y-2 overflow-y-auto pr-1">
-          {visible.length === 0 && <EmptyState text="Ordinace se nacitaji." />}
-          {visible.map((clinic, index) => (
-            <ClinicSlotCard key={`${clinic.name}-map-${index}`} clinic={clinic} rank={index + 1} />
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-xs font-medium uppercase text-slate-400">{label}</span>
-      <input className="field-input h-10" value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function Metric({ label, value, bar }: { label: string; value: string; bar?: number }) {
-  return (
-    <div className="metric-card">
-      <div className="text-xs font-medium uppercase text-slate-400">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-ink">{value}</div>
-      {bar !== undefined && (
-        <div className="mt-2 h-1.5 rounded-full bg-slate-100">
-          <div className="h-1.5 rounded-full bg-mint" style={{ width: `${Math.max(4, Math.min(100, bar))}%` }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AppearanceControls({
-  themeMode,
-  fontSizeMode,
-  onThemeModeChange,
-  onFontSizeModeChange
-}: {
-  themeMode: ThemeMode;
-  fontSizeMode: FontSizeMode;
-  onThemeModeChange: (value: ThemeMode) => void;
-  onFontSizeModeChange: (value: FontSizeMode) => void;
-}) {
-  const fontModes: FontSizeMode[] = ["normal", "large", "xlarge"];
-  const currentIndex = fontModes.indexOf(fontSizeMode);
-
-  return (
-    <div className="appearance-controls">
-      <button
-        className="icon-button"
-        onClick={() => onThemeModeChange(themeMode === "dark" ? "light" : "dark")}
-        title={themeMode === "dark" ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}
-      >
-        {themeMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-      </button>
-      <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1">
-        <button
-          className="font-size-button"
-          onClick={() => onFontSizeModeChange(fontModes[Math.max(0, currentIndex - 1)])}
-          title="Zmenšit písmo"
-          disabled={currentIndex === 0}
-        >
-          A-
-        </button>
-        <span className="min-w-12 text-center text-xs font-semibold text-slate-500">
-          {fontSizeMode === "normal" ? "100%" : fontSizeMode === "large" ? "115%" : "130%"}
-        </span>
-        <button
-          className="font-size-button text-base"
-          onClick={() => onFontSizeModeChange(fontModes[Math.min(fontModes.length - 1, currentIndex + 1)])}
-          title="Zvětšit písmo"
-          disabled={currentIndex === fontModes.length - 1}
-        >
-          A+
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function StatusPill({ icon, label, ok }: { icon: ReactNode; label: string; ok: boolean }) {
-  return (
-    <div className={`status-pill ${ok ? "border-mint/30 bg-mint/10 text-mint" : "border-amber/30 bg-amber/10 text-amber"}`}>
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold ${ok ? "bg-mint/10 text-mint" : "bg-amber/10 text-amber"}`}>
       {icon}
       {label}
-    </div>
+    </span>
   );
 }
 
-function TabButton({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button className={`tab-button ${active ? "tab-button-active" : ""}`} onClick={onClick}>
-      {icon}
-      {label}
-    </button>
-  );
+function mergeStep(current: AgentStep[], next: AgentStep): AgentStep[] {
+  const exists = current.some((step) => step.id === next.id);
+  if (!exists) return [...current, next];
+  return current.map((step) => (step.id === next.id ? { ...step, ...next } : step));
 }
 
-function PanelTitle({ icon, title, subtitle }: { icon: ReactNode; title: string; subtitle: string }) {
-  return (
-    <div className="mb-4">
-      <div className="flex items-center gap-2">
-        <span className="text-mint">{icon}</span>
-        <h2 className="text-base font-semibold">{title}</h2>
-      </div>
-      <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
-    </div>
-  );
-}
-
-function StepItem({ step, index, active }: { step: AgentStep; index: number; active: boolean }) {
-  const style =
-    step.status === "done"
-      ? "border-mint/30 bg-mint/10"
-      : step.status === "warning"
-        ? "border-amber/30 bg-amber/10"
-        : step.status === "error"
-          ? "border-coral/30 bg-coral/10"
-          : active
-            ? "border-sky-300 bg-sky-50"
-            : "border-slate-200 bg-white";
-
-  return (
-    <div className={`rounded-md border p-3 ${style}`}>
-      <div className="flex items-start gap-3">
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white text-sm font-semibold shadow-sm">
-          {active ? <Loader2 className="animate-spin" size={15} /> : index + 1}
-        </div>
-        <div className="min-w-0">
-          <div className="font-medium">{step.label}</div>
-          <div className="mt-1 text-sm text-slate-600">{step.detail}</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SourceCard({ source, index, maxScore }: { source: Source; index: number; maxScore: number }) {
-  const width = maxScore > 0 ? Math.max(8, Math.round((source.score / maxScore) * 100)) : 0;
-
-  return (
-    <article className="rounded-md border border-slate-200 bg-white p-4">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-mint/10 text-mint">{index + 1}</span>
-            <span className="truncate">{source.source}</span>
-          </div>
-          <div className="mt-2 h-1.5 rounded-full bg-slate-100">
-            <div className="h-1.5 rounded-full bg-mint" style={{ width: `${width}%` }} />
-          </div>
-        </div>
-        <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{source.score}</span>
-      </div>
-      {source.resolution && <p className="mb-2 text-sm font-medium text-ink">{source.resolution}</p>}
-      <p className="text-sm leading-6 text-slate-600">{source.excerpt}</p>
-    </article>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-      {text}
-    </div>
-  );
-}
-
-// ── utils ──────────────────────────────────────────────────────────────────
-
-function compactUser(user: UserInfo): UserInfo | null {
-  const hasCaseData = Boolean(
-    trimOrUndefined(user.patient_name) ||
-    trimOrUndefined(user.patient_identifier) ||
-    trimOrUndefined(user.patient_age) ||
-    trimOrUndefined(user.patient_city) ||
-    trimOrUndefined(user.patient_address) ||
-    trimOrUndefined(user.patient_phone) ||
-    trimOrUndefined(user.patient_email) ||
-    trimOrUndefined(user.problem_summary) ||
-    (user.urgency && user.urgency !== "normal")
-  );
-  const compacted: UserInfo = {
-    name: trimOrUndefined(user.name),
-    clinic: trimOrUndefined(user.clinic),
-    role: trimOrUndefined(user.role),
-    software_version: trimOrUndefined(user.software_version),
-    contact: trimOrUndefined(user.contact),
-    patient_name: trimOrUndefined(user.patient_name),
-    patient_identifier: trimOrUndefined(user.patient_identifier),
-    patient_age: trimOrUndefined(user.patient_age),
-    patient_city: trimOrUndefined(user.patient_city),
-    patient_address: trimOrUndefined(user.patient_address),
-    patient_phone: trimOrUndefined(user.patient_phone),
-    patient_email: trimOrUndefined(user.patient_email),
-    preferred_contact_method: hasCaseData ? (user.preferred_contact_method ?? "any") : undefined,
-    urgency: hasCaseData ? (user.urgency ?? "normal") : undefined,
-    problem_summary: trimOrUndefined(user.problem_summary)
-  };
-  return Object.values(compacted).some(Boolean) ? compacted : null;
-}
-
-function trimOrUndefined(value?: string | null): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
+function sourceStrengthPercent(sources: Source[]): number {
+  const best = Math.max(0, ...sources.map((source) => source.score));
+  if (!best) return 0;
+  return Math.max(1, Math.min(100, Math.round(best * 100)));
 }
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -1723,75 +512,9 @@ function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
 }
 
-function normalizeVoiceName(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
-function buildCarePrompt(user: UserInfo): string {
-  const name = user.patient_name?.trim() || "pacient";
-  const city = user.patient_city?.trim() || user.patient_address?.trim() || "nejblizsi dostupna lokalita";
-  const contact = user.patient_phone?.trim() || user.patient_email?.trim() || user.contact?.trim() || "kontakt chybi";
-  const urgency = {
-    low: "nizka urgence",
-    normal: "bezna urgence",
-    high: "vysoka urgence",
-    critical: "kriticka urgence"
-  }[user.urgency ?? "normal"];
-  const problem = user.problem_summary?.trim() || "pacient potrebuje najit vhodnou ordinaci a nejdrivejsi termin";
-  const preferred = user.preferred_contact_method && user.preferred_contact_method !== "any"
-    ? `Preferovany kontakt: ${user.preferred_contact_method}.`
-    : "Kontakt zvol podle dostupnosti.";
-
-  return [
-    `Pacient: ${name}.`,
-    `Lokalita: ${city}.`,
-    `Kontakt: ${contact}.`,
-    `Urgence: ${urgency}.`,
-    `Problem: ${problem}.`,
-    preferred,
-    "Vyhodnot urgenci, najdi nejdrivejsi termin, doporuc ordinace pobliz a priprav predrezervaci nebo eskalaci."
-  ].join(" ");
-}
-
-function sortVoices(voices: SpeechSynthesisVoice[], language: VoiceLanguage): SpeechSynthesisVoice[] {
-  return [...voices].sort((left, right) => voiceScore(right, language) - voiceScore(left, language));
-}
-
-function voiceScore(voice: SpeechSynthesisVoice, language: VoiceLanguage): number {
-  const name = normalizeVoiceName(`${voice.name} ${voice.voiceURI} ${voice.lang}`);
-  const lang = voice.lang.toLowerCase();
-  const target = language.toLowerCase();
-  const base = target.split("-")[0];
-  let score = 0;
-  if (lang === target) score += 90;
-  if (lang.startsWith(base)) score += 65;
-  if (language === "cs-CZ" && lang.startsWith("sk")) score += 18;
-  if (language === "sk-SK" && lang.startsWith("cs")) score += 18;
-  if (name.includes("google")) score += 8;
-  if (name.includes("microsoft")) score += 10;
-  if (voice.localService) score += 3;
-  return score;
-}
-
-function selectAssistantVoice(
-  voices: SpeechSynthesisVoice[],
-  language: VoiceLanguage,
-  preferredVoiceURI = ""
-): SpeechSynthesisVoice | null {
-  const preferred = voices.find((voice) => voice.voiceURI === preferredVoiceURI);
-  if (preferred) return preferred;
-
-  const base = language.toLowerCase().split("-")[0];
-  const languageVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith(base));
-  const candidates = languageVoices.length > 0 ? languageVoices : voices;
-  return sortVoices(candidates, language)[0] ?? voices[0] ?? null;
-}
-
-function toleranceName(value: RetrievalTolerance): string {
-  return toleranceOptions.find((option) => option.value === value)?.label ?? value;
+function selectCzechVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
+  const czech = voices.filter((voice) => voice.lang.toLowerCase().startsWith("cs"));
+  return czech.find((voice) => voice.localService) ?? czech[0] ?? voices[0] ?? null;
 }
 
 export default App;

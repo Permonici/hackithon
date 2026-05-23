@@ -147,85 +147,93 @@ body {
     border-radius: 999px;
   }
 
-  .care-agent-panel {
+  .xdent-widget-page {
+    min-height: 100vh;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 249, 0.98));
+      radial-gradient(circle at 20% 15%, rgba(30, 157, 115, 0.14), transparent 28%),
+      linear-gradient(135deg, #f8fafc 0%, #eef6f3 48%, #f4f7fb 100%);
+    color: #111827;
   }
 
-  .clinic-slot-card {
-    @apply rounded-md border border-slate-200 bg-white transition hover:border-mint/50 hover:shadow-panel;
+  .xdent-widget-background {
+    @apply mx-auto flex min-h-screen max-w-5xl items-center gap-5 px-6 text-slate-700;
   }
 
-  .bottom-workflow-bar {
-    @apply grid gap-3 rounded-md border border-slate-200 bg-white p-3 shadow-panel md:grid-cols-2 xl:grid-cols-4;
+  .xdent-widget-background h1 {
+    @apply text-3xl font-bold text-ink;
   }
 
-  .workflow-tile {
-    @apply flex min-h-20 items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:border-mint/50 hover:bg-mint/5;
+  .xdent-widget-background p {
+    @apply mt-2 max-w-xl text-base leading-7 text-slate-500;
   }
 
-  .workflow-tile-icon {
-    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-white text-mint shadow-sm;
-  }
-
-  .clinic-map {
-    position: relative;
-    min-height: 320px;
-    overflow: hidden;
-    border-radius: 8px;
-    border: 1px solid rgba(15, 23, 42, 0.12);
-    background:
-      linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.28)),
-      url("/aerial-map.svg") center / cover no-repeat;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
-  }
-
-  .map-pin {
-    position: absolute;
+  .xdent-chat-popup {
+    position: fixed;
+    right: 24px;
+    bottom: 96px;
+    z-index: 50;
     display: flex;
-    width: 34px;
-    height: 34px;
+    width: min(430px, calc(100vw - 32px));
+    height: min(720px, calc(100vh - 122px));
+    overflow: hidden;
+    flex-direction: column;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    border-radius: 14px;
+    background: #ffffff;
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
+  }
+
+  .xdent-chat-header {
+    @apply flex items-center justify-between gap-3 px-4 py-3 text-white;
+    background:
+      linear-gradient(135deg, #111827 0%, #13241f 60%, #1e9d73 140%);
+  }
+
+  .xdent-header-button {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/15 bg-white/10 text-white transition hover:bg-white/20;
+  }
+
+  .xdent-chat-status {
+    @apply flex min-h-12 items-center gap-2 border-b border-slate-200 bg-slate-50 px-4;
+  }
+
+  .xdent-chat-messages {
+    @apply min-h-0 flex-1 space-y-4 overflow-y-auto bg-white px-4 py-4;
+  }
+
+  .xdent-chat-samples {
+    @apply thin-scroll flex max-h-24 gap-2 overflow-x-auto border-t border-slate-200 bg-slate-50 px-4 py-3;
+  }
+
+  .xdent-chat-samples .sample-chip {
+    @apply shrink-0 whitespace-nowrap;
+  }
+
+  .xdent-chat-input {
+    @apply grid gap-3 border-t border-slate-200 bg-white p-4;
+  }
+
+  .xdent-chat-launcher {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 51;
+    display: inline-flex;
+    width: 62px;
+    height: 62px;
     align-items: center;
     justify-content: center;
-    transform: translate(-50%, -100%);
-    border: 3px solid #fff;
-    border-radius: 999px 999px 999px 4px;
-    box-shadow: 0 14px 25px rgba(15, 23, 42, 0.2);
-    color: #fff;
-    font-size: 0.78rem;
-    font-weight: 800;
-    rotate: -45deg;
-  }
-
-  .map-pin > span {
-    rotate: 45deg;
-  }
-
-  .map-pin-open {
-    background: #1e9d73;
-  }
-
-  .map-pin-limited {
-    background: #d97706;
-  }
-
-  .legend-dot {
-    display: inline-block;
-    width: 0.62rem;
-    height: 0.62rem;
+    border: 4px solid #ffffff;
     border-radius: 999px;
+    background: #1e9d73;
+    color: #ffffff;
+    box-shadow: 0 18px 45px rgba(30, 157, 115, 0.38);
+    transition: transform 160ms ease, background 160ms ease;
   }
 
-  .collapsible-panel {
-    @apply p-4;
-  }
-
-  .collapsible-trigger {
-    @apply flex min-w-0 flex-1 items-center gap-3 text-left outline-none;
-  }
-
-  .faq-card {
-    @apply flex min-h-24 items-start gap-3 rounded-md border border-slate-200 bg-white p-4 text-left transition hover:border-mint/50 hover:bg-mint/5 hover:shadow-panel;
+  .xdent-chat-launcher:hover {
+    transform: translateY(-2px);
+    background: #167f5d;
   }
 }
 
@@ -342,30 +350,26 @@ body {
   color: #0f172a;
 }
 
-.dark .care-agent-panel {
+.dark .xdent-widget-page {
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(17, 24, 39, 0.98));
+    radial-gradient(circle at 20% 15%, rgba(30, 157, 115, 0.18), transparent 28%),
+    linear-gradient(135deg, #020617 0%, #101827 54%, #081a15 100%);
 }
 
-.dark .clinic-slot-card,
-.dark .bottom-workflow-bar,
-.dark .workflow-tile,
-.dark .faq-card {
-  background-color: #0f172a;
+.dark .xdent-widget-background h1,
+.dark .xdent-widget-background {
+  color: #f8fafc;
+}
+
+.dark .xdent-chat-popup,
+.dark .xdent-chat-messages,
+.dark .xdent-chat-input {
+  background: #0f172a;
   border-color: #263247;
 }
 
-.dark .workflow-tile:hover {
-  background-color: rgba(30, 157, 115, 0.08);
-}
-
-.dark .workflow-tile-icon {
-  background-color: #111827;
-}
-
-.dark .clinic-map {
+.dark .xdent-chat-status,
+.dark .xdent-chat-samples {
+  background: #111827;
   border-color: #263247;
-  background:
-    linear-gradient(180deg, rgba(2, 6, 23, 0.05), rgba(2, 6, 23, 0.35)),
-    url("/aerial-map.svg") center / cover no-repeat;
 }

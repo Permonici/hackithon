@@ -18,11 +18,9 @@ AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení fu
 - Hlasový vstup přes mikrofon a volitelné přečtení odpovědi s volbou jazyka hlasu.
 - Rozklikávací seznam konkrétních zdrojů přímo u odpovědi v chatu.
 - Pacientský formulář s urgencí, konkrétním problémem a lokálním uložením v prohlížeči.
-- Pacientský agent s textovým zadáním, doporučením nejdřívějších termínů, předrezervací a eskalací.
-- Malá mapa demo ordinací včetně dentální hygieny a informace, zda nabírají nové pacienty.
-- Letecká mapa demo ordinací včetně dentální hygieny a informace, zda nabírají nové pacienty.
-- Workflow lišta pod mapou: nejčastější dotazy, předobjednání, kontakty a historie.
-- Skládací pravý panel, aby demo zůstalo přehledné i na menším monitoru.
+- Vložitelný chat widget v pravém dolním rohu stránky.
+- Síla zdroje přímo v odpovědi v chatu.
+- Mikrofon a hlasový výstup zjednodušený na češtinu.
 - Light/dark mode a zvětšení písma pro lepší prezentaci i přístupnost.
 - JSONL log interakcí pro vyhodnocení kvality.
 - Offline fallback skripty bez Dockeru a bez API klíče.
@@ -68,9 +66,7 @@ http://localhost:8080
 3. V záložce `Chat` doplňte pacienta/případ, urgenci, konkrétní problém, vyberte toleranci hledání a odešlete dotaz.
 4. V konverzaci sledujte odpověď, zdroje z transkripcí, téma a jistotu.
 5. Záložka `Historie` drží lokální chat history pro demo a zpětné vyhodnocení.
-6. Panel `Pacientský agent` vyhodnotí urgenci, ukáže demo ordinace poblíž a připraví předrezervaci nejbližšího termínu.
-
-Poznámka: ordinace a termíny ve frontendu jsou demo workflow. Pro ostré použití se tato vrstva napojí na reálný kalendář XDENT / recepci.
+6. Chat odpoví stručně, ukáže sílu zdroje a rozkliknutelné zdroje z transkripcí.
 
 Pokud indexace po předchozí chybě zůstane v divném stavu, vyčistěte Qdrant volume a spusťte aplikaci znovu:
 
@@ -114,7 +110,7 @@ http://localhost:6333/dashboard
 ## Demo scénář pro porotu
 
 1. Otevřete `http://localhost:8080`.
-2. Zkontrolujte stav `Model ready` a počet chunků.
+2. Zkontrolujte stav indexu a počet chunků.
 3. Vyberte ukázkový dotaz na ePoukaz.
 4. Ukažte, že agent projde kroky:
    - rozpoznání tématu,
