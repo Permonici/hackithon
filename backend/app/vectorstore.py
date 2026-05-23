@@ -76,6 +76,7 @@ def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestRe
                 page_content=chunk.text,
                 metadata={
                     **chunk.metadata,
+                    "doc_type": "transcript",
                     "chunk_id": chunk.id,
                     "source": source_label(chunk),
                     "topic_label": label_for(topic),
@@ -160,9 +161,112 @@ def search_sources(
                 summary=metadata.get("summary"),
                 intent=metadata.get("intent"),
                 resolution=metadata.get("resolution"),
+                source_type=metadata.get("doc_type") or "transcript",
             )
         )
     return sources
+
+
+def search_generated_qa(
+    settings: Settings,
+    query: str,
+    *,
+    top_k: int = 3,
+    topic_hint: str | None = None,
+) -> list[Source]:
+    try:
+        store = build_vector_store(settings)
+    except Exception:
+        return []
+
+    conditions: list[qdrant_models.Condition] = [
+        qdrant_models.FieldCondition(
+            key="metadata.doc_type",
+            match=qdrant_models.MatchValue(value="qa_generated"),
+        )
+    ]
+    if topic_hint:
+        conditions.append(
+            qdrant_models.FieldCondition(
+                key="metadata.topic",
+                match=qdrant_models.MatchValue(value=topic_hint),
+            )
+        )
+
+    try:
+        docs_with_scores = store.similarity_search_with_score(
+            query,
+            k=top_k,
+            filter=qdrant_models.Filter(must=conditions),
+        )
+    except Exception:
+        return []
+
+    sources: list[Source] = []
+    for doc, score in docs_with_scores:
+        metadata = doc.metadata
+        sources.append(
+            Source(
+                source=str(metadata.get("source") or metadata.get("chunk_id") or "naucena Q&A"),
+                topic=metadata.get("topic"),
+                score=round(float(score), 4),
+                excerpt=compact_text(doc.page_content, limit=520),
+                summary=metadata.get("summary"),
+                intent=metadata.get("intent"),
+                resolution=metadata.get("resolution"),
+                source_type="qa_generated",
+            )
+        )
+    return sources
+
+
+def upsert_generated_qa(
+    settings: Settings,
+    *,
+    question: str,
+    answer: str,
+    topic: str | None,
+) -> Source | None:
+    try:
+        store = build_vector_store(settings)
+    except Exception:
+        return None
+
+    qa_id = _stable_id(f"qa-generated:{question}")
+    topic_label = label_for(topic)
+    source = f"Naucena Q&A: {topic_label}"
+    document = Document(
+        page_content=f"Otazka: {question}\nOdpoved: {answer}",
+        metadata={
+            "doc_type": "qa_generated",
+            "chunk_id": f"qa-generated-{qa_id}",
+            "source": source,
+            "topic": topic,
+            "topic_label": topic_label,
+            "auto_topic": topic,
+            "auto_topic_label": topic_label,
+            "auto_topic_confidence": 0.45,
+            "intent": question,
+            "resolution": answer,
+            "summary": answer,
+            "quality": 0.45,
+        },
+    )
+    try:
+        store.add_documents([document], ids=[qa_id])
+    except Exception:
+        return None
+
+    return Source(
+        source=source,
+        topic=topic,
+        score=0.45,
+        excerpt=compact_text(document.page_content, limit=520),
+        summary=answer,
+        intent=question,
+        resolution=answer,
+        source_type="qa_generated",
+    )
 
 
 def _effective_k(top_k: int, tolerance: str) -> int:

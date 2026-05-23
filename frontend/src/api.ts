@@ -1,4 +1,4 @@
-import type { AgentStep, CacheStats, ChatRequestPayload, ChatResponse, PriceInfoResponse, StatsResponse } from "./types";
+import type { AgentStep, ChatRequestPayload, ChatResponse, StatsResponse } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -6,14 +6,6 @@ export async function fetchStats(): Promise<StatsResponse> {
   const response = await fetch(`${API_URL}/stats`);
   if (!response.ok) {
     throw new Error("Statistiky se nepodařilo načíst.");
-  }
-  return response.json();
-}
-
-export async function fetchPricing(): Promise<PriceInfoResponse> {
-  const response = await fetch(`${API_URL}/pricing`);
-  if (!response.ok) {
-    throw new Error("Ceník se nepodařilo načíst.");
   }
   return response.json();
 }
@@ -67,14 +59,6 @@ export async function sendChatStream(
     throw new Error("Stream skončil bez finální odpovědi.");
   }
   return finalResponse;
-}
-
-export async function fetchCacheStats(): Promise<CacheStats> {
-  const response = await fetch(`${API_URL}/cache/stats`);
-  if (!response.ok) {
-    throw new Error("Cache statistiky se nepodařilo načíst.");
-  }
-  return response.json();
 }
 
 export async function ingestData(): Promise<void> {

@@ -2,10 +2,10 @@ export type RetrievalTolerance = "strict" | "balanced" | "broad";
 
 export type UserInfo = {
   name?: string | null;
-  clinic?: string | null;
-  role?: string | null;
-  software_version?: string | null;
+  surname?: string | null;
+  problem?: string | null;
   contact?: string | null;
+  available_at?: string | null;
 };
 
 export type AgentStep = {
@@ -24,6 +24,7 @@ export type Source = {
   summary?: string | null;
   intent?: string | null;
   resolution?: string | null;
+  source_type?: "transcript" | "qa_generated";
 };
 
 export type UsageEstimate = {
@@ -44,6 +45,8 @@ export type ChatResponse = {
   topic_label: string;
   confidence: number;
   sources: Source[];
+  chunks_considered: number;
+  chunks_used: number;
   steps: AgentStep[];
   escalation_packet?: string | null;
   used_llm: boolean;
@@ -69,17 +72,6 @@ export type StatsResponse = {
   qdrant_ready: boolean;
 };
 
-export type PriceInfoResponse = {
-  currency: string;
-  chat_model: string;
-  embedding_model: string;
-  chat_input_price_per_1m: number;
-  chat_output_price_per_1m: number;
-  embedding_price_per_1m: number;
-  note: string;
-  reference_url: string;
-};
-
 export type ChatRequestPayload = {
   message: string;
   strict_mode: boolean;
@@ -89,13 +81,3 @@ export type ChatRequestPayload = {
   user?: UserInfo | null;
 };
 
-export type FrequentQuery = {
-  query: string;
-  count: number;
-};
-
-export type CacheStats = {
-  active_entries: number;
-  total_tracked_queries: number;
-  top_frequent: FrequentQuery[];
-};

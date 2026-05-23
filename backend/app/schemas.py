@@ -7,10 +7,10 @@ from pydantic import BaseModel, Field
 
 class UserInfo(BaseModel):
     name: str | None = Field(default=None, max_length=120)
-    clinic: str | None = Field(default=None, max_length=160)
-    role: str | None = Field(default=None, max_length=120)
-    software_version: str | None = Field(default=None, max_length=80)
+    surname: str | None = Field(default=None, max_length=120)
+    problem: str | None = Field(default=None, max_length=1200)
     contact: str | None = Field(default=None, max_length=160)
+    available_at: str | None = Field(default=None, max_length=80)
 
 
 class ChatRequest(BaseModel):
@@ -30,6 +30,7 @@ class Source(BaseModel):
     summary: str | None = None
     intent: str | None = None
     resolution: str | None = None
+    source_type: Literal["transcript", "qa_generated"] = "transcript"
 
 
 class AgentStep(BaseModel):
@@ -58,6 +59,8 @@ class ChatResponse(BaseModel):
     topic_label: str
     confidence: float
     sources: list[Source]
+    chunks_considered: int = 0
+    chunks_used: int = 0
     steps: list[AgentStep]
     escalation_packet: str | None = None
     used_llm: bool

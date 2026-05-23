@@ -15,7 +15,7 @@ from .pricing import resolve_chat_prices, resolve_embedding_price
 from .schemas import AgentStep, ChatResponse, Source, UsageEstimate, UserInfo
 from .topics import classify_topic
 from .utils import append_jsonl, utc_now
-from .vectorstore import search_sources
+from .vectorstore import search_generated_qa, search_sources, upsert_generated_qa
 
 
 @lru_cache(maxsize=4)
@@ -43,7 +43,7 @@ SYSTEM_PROMPT = """Jsi AI operátor 1. úrovně podpory pro stomatologický soft
 Odpovídej česky, velmi stručně a přímo k věci.
 Použij pouze dodané zdroje z transkripcí.
 Pokud zdroje nestačí, řekni to a doporuč eskalaci na podporu.
-Na konec uveď krátký řádek `Zdroj: ...` a použij přesný název zdroje z kontextu, ne pouze číslo v hranaté závorce.
+Do odpovědi nepiš řádek `Zdroj:`; zdroje se ukazují samostatně v chatu.
 Nevymýšlej postupy mimo kontext."""
 
 
@@ -106,6 +106,13 @@ class SupportAgent:
         )
 
         topic_hint = classified.topic if classified.confidence >= 0.35 else None
+        learned_sources = search_generated_qa(
+            self.settings,
+            message,
+            top_k=min(3, top_k),
+            topic_hint=topic_hint,
+        )
+        learned_best_score = max((source.score for source in learned_sources), default=0.0)
         sources = search_sources(
             self.settings,
             message,
@@ -113,6 +120,8 @@ class SupportAgent:
             topic_hint=topic_hint,
             tolerance=retrieval_tolerance,
         )
+        if learned_sources and learned_best_score >= self._min_score(False, "balanced"):
+            sources = learned_sources + sources
         best_score = max((source.score for source in sources), default=0.0)
         steps.append(
             AgentStep(
@@ -120,12 +129,15 @@ class SupportAgent:
                 label="Vyhledání v transkripcích",
                 status="done" if sources else "warning",
                 detail=(
-                    f"Nalezeno {len(sources)} relevantních částí hovorů "
+                    f"Nalezeno {len(sources)} relevantních zdrojů/chunků "
                     f"({self._tolerance_label(retrieval_tolerance)} hledání)."
+                    + (f" Z toho {len(learned_sources)} naučených Q&A." if learned_sources else "")
                 ),
                 payload={
                     "top_score": best_score,
                     "tolerance": retrieval_tolerance,
+                    "chunks_considered": len(sources),
+                    "chunks_used": min(len(sources), 4),
                     "sources": [source.model_dump() for source in sources[:3]],
                 },
             )
@@ -133,6 +145,7 @@ class SupportAgent:
 
         min_score = self._min_score(strict_mode, retrieval_tolerance)
         grounded = bool(sources) and best_score >= min_score
+        chunks_considered = len(sources)
         steps.append(
             AgentStep(
                 id="validate",
@@ -153,22 +166,48 @@ class SupportAgent:
         )
 
         if not grounded:
-            escalation_packet = create_escalation_packet_tool.invoke(
-                {
-                    "message": message,
-                    "topic": classified.label,
-                    "reason": "Nízká shoda v transkripcích nebo chybějící ověřený postup.",
-                }
-            )
-            answer = (
-                f"Téma: {classified.label}.\n"
-                "V dostupných transkripcích k tomu nemám dost jistý podklad. "
-                "Předejte dotaz 2. úrovni podpory a přiložte přesnou chybovou hlášku nebo screenshot.\n"
-                "Zdroj: nedostatečný kontext"
-            )
-            used_llm = False
-            answer_status = "done"
-            answer_detail = "Odpověď je bezpečně eskalovaná."
+            generated_answer = self._draft_unverified_answer(message, classified.label)
+            generated_source = None
+            if generated_answer:
+                generated_source = upsert_generated_qa(
+                    self.settings,
+                    question=message,
+                    answer=generated_answer,
+                    topic=classified.topic,
+                )
+
+            if generated_answer and generated_source:
+                answer = generated_answer
+                sources = [generated_source]
+                escalation_packet = None
+                used_llm = True
+                answer_status = "warning"
+                answer_detail = "Nebyl nalezen jistý zdroj, proto vznikla krátká navržená odpověď a uložila se do Qdrantu pro další dotazy."
+                steps.append(
+                    AgentStep(
+                        id="learn",
+                        label="Uložení nové otázky",
+                        status="done",
+                        detail="Dotaz a navržená odpověď jsou uložené ve vektorové databázi.",
+                        payload={"source": generated_source.model_dump()},
+                    )
+                )
+            else:
+                escalation_packet = create_escalation_packet_tool.invoke(
+                    {
+                        "message": message,
+                        "topic": classified.label,
+                        "reason": "Nízká shoda v transkripcích a nepodařilo se vytvořit použitelný návrh odpovědi.",
+                    }
+                )
+                answer = (
+                    f"Téma: {classified.label}.\n"
+                    "K tomuto dotazu nemám dost jistou odpověď. "
+                    "Prosím přesměrujte klienta na lidského operátora podpory."
+                )
+                used_llm = False
+                answer_status = "done"
+                answer_detail = "Odpověď je předaná lidskému operátorovi."
         else:
             escalation_packet = None
             try:
@@ -191,11 +230,13 @@ class SupportAgent:
         )
 
         response = ChatResponse(
-            answer=answer,
+            answer=self._strip_source_lines(answer),
             topic=classified.topic or "unknown",
             topic_label=classified.label,
             confidence=classified.confidence,
             sources=sources,
+            chunks_considered=max(chunks_considered, len(sources)),
+            chunks_used=min(len(sources), 4),
             steps=steps,
             escalation_packet=escalation_packet,
             used_llm=used_llm,
@@ -245,21 +286,54 @@ class SupportAgent:
         )
         return str(result.content).strip(), True
 
+    def _draft_unverified_answer(self, message: str, topic_label: str) -> str | None:
+        if not self.settings.openai_api_key:
+            return None
+
+        llm = _get_llm(self.settings.openai_chat_model, self.settings.openai_api_key)
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "Jsi AI operator podpory XDENT. Pro dotaz neni dostatecny zdroj v transkripcich. "
+                    "Navrhni pouze obecnou, opatrnou a kratkou odpoved pro prvni uroven podpory. "
+                    "Nevydavej odpoved za overenou informaci ze zdroju. Pokud odpoved nedava smysl, vrat presne ESCALATE.",
+                ),
+                (
+                    "human",
+                    "Tema: {topic}\nDotaz: {message}\n\n"
+                    "Odpovez maximalne 2 kratkymi vetami, bez radku Zdroj.",
+                ),
+            ]
+        )
+        try:
+            result = (prompt | llm).invoke({"topic": topic_label, "message": message})
+        except Exception:
+            return None
+        answer = str(result.content).strip()
+        if not answer or answer.upper().startswith("ESCALATE") or len(answer) < 12:
+            return None
+        return self._strip_source_lines(answer)
+
     def _fallback_answer(self, topic_label: str, sources: list[Source]) -> tuple[str, bool]:
         if not sources:
             return (
                 f"Téma: {topic_label}.\n"
-                "V dostupných transkripcích k tomu nemám dost jistý podklad. Předejte dotaz podpoře.\n"
-                "Zdroj: nedostatečný kontext"
+                "V dostupných transkripcích k tomu nemám dost jistý podklad. Předejte dotaz podpoře."
             ), False
 
         best = sources[0]
         resolution = best.resolution or best.summary or best.excerpt
         return (
             f"Téma: {topic_label}.\n"
-            f"Podle dostupných hovorů: {resolution}\n"
-            f"Zdroj: {best.source}"
+            f"Podle dostupných hovorů: {resolution}"
         ), False
+
+    def _strip_source_lines(self, answer: str) -> str:
+        return "\n".join(
+            line for line in answer.splitlines()
+            if not line.strip().lower().startswith("zdroj:")
+        ).strip()
 
     def _source_context(self, sources: list[Source]) -> str:
         return "\n\n".join(
@@ -275,10 +349,10 @@ class SupportAgent:
             return "neuvedeno"
         parts = [
             ("jméno", user.name),
-            ("ordinace", user.clinic),
-            ("role", user.role),
-            ("verze XDENT", user.software_version),
+            ("příjmení", user.surname),
+            ("potíže", user.problem),
             ("kontakt", user.contact),
+            ("čas klienta", user.available_at),
         ]
         filled = [f"{label}: {value}" for label, value in parts if value]
         return "; ".join(filled) if filled else "neuvedeno"
