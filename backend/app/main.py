@@ -23,7 +23,7 @@ from .schemas import (
     StatsResponse,
 )
 from .topics import topic_catalog
-from .vectorstore import get_stats, ingest_transcripts, qdrant_collection_exists
+from .vectorstore import IndexingAlreadyRunningError, get_stats, ingest_transcripts, qdrant_collection_exists
 
 
 settings = get_settings()
@@ -62,7 +62,9 @@ def ingest() -> IngestResponse:
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="Chybí OPENAI_API_KEY pro vytvoření embeddingů.")
     try:
-        return ingest_transcripts(settings, recreate=True)
+        return ingest_transcripts(settings, recreate=False)
+    except IndexingAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=500,

@@ -27,6 +27,11 @@ from .utils import compact_text
 STATS_CACHE_TTL_SECONDS = 60.0
 _stats_cache_lock = threading.Lock()
 _stats_cache: dict[tuple[str, str, bool], tuple[float, StatsResponse]] = {}
+_ingest_lock = threading.Lock()
+
+
+class IndexingAlreadyRunningError(RuntimeError):
+    pass
 
 
 @lru_cache(maxsize=4)
@@ -87,7 +92,16 @@ def clear_stats_cache() -> None:
         _stats_cache.clear()
 
 
-def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestResponse:
+def ingest_transcripts(settings: Settings, *, recreate: bool = False) -> IngestResponse:
+    if not _ingest_lock.acquire(blocking=False):
+        raise IndexingAlreadyRunningError("Indexace uz bezi. Pockejte prosim na dokonceni.")
+    try:
+        return _ingest_transcripts_unlocked(settings, recreate=recreate)
+    finally:
+        _ingest_lock.release()
+
+
+def _ingest_transcripts_unlocked(settings: Settings, *, recreate: bool) -> IngestResponse:
     ingest = build_chunks(
         settings.data_dir,
         chunk_size=settings.chunk_size,

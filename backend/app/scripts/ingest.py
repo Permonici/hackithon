@@ -6,7 +6,7 @@ from app.vectorstore import ingest_transcripts
 
 def main() -> None:
     settings = get_settings()
-    result = ingest_transcripts(settings, recreate=True)
+    result = ingest_transcripts(settings, recreate=False)
     print(result.model_dump_json(indent=2))
 
 
