@@ -55,13 +55,30 @@ def _embeddings(settings: Settings) -> OpenAIEmbeddings:
     )
 
 
-def build_vector_store(settings: Settings) -> QdrantVectorStore:
+@lru_cache(maxsize=4)
+def make_vector_store(
+    qdrant_url: str,
+    collection_name: str,
+    embedding_model: str,
+    api_key: str,
+    dimensions: int | None,
+) -> QdrantVectorStore:
     return QdrantVectorStore.from_existing_collection(
-        embedding=_embeddings(settings),
+        embedding=make_embeddings(embedding_model, api_key, dimensions),
         sparse_embedding=make_sparse_embedding("Qdrant/bm25"),
         retrieval_mode=RetrievalMode.HYBRID,
-        collection_name=settings.qdrant_collection,
-        url=settings.qdrant_url,
+        collection_name=collection_name,
+        url=qdrant_url,
+    )
+
+
+def build_vector_store(settings: Settings) -> QdrantVectorStore:
+    return make_vector_store(
+        settings.qdrant_url,
+        settings.qdrant_collection,
+        settings.openai_embedding_model,
+        settings.openai_api_key,
+        settings.openai_embedding_dimensions or None,
     )
 
 
@@ -118,6 +135,7 @@ def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestRe
         force_recreate=recreate,
     )
     get_qdrant_client.cache_clear()
+    make_vector_store.cache_clear()
     clear_stats_cache()
 
     return IngestResponse(

@@ -197,19 +197,6 @@ body {
     @apply h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-ink outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20;
   }
 
-  .quick-strip summary > span:last-of-type {
-    @apply ml-auto;
-  }
-
-  .quick-strip summary::after {
-    content: "+";
-    @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-black text-slate-500;
-  }
-
-  .quick-strip[open] summary::after {
-    content: "-";
-  }
-
   .memory-chip {
     @apply rounded-md bg-white px-2 py-1 text-[11px] font-medium text-slate-600 shadow-sm;
   }
@@ -222,8 +209,12 @@ body {
     @apply border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600;
   }
 
-  .quick-strip summary {
-    @apply flex cursor-pointer list-none items-center gap-2 font-semibold;
+  .quick-strip-head {
+    @apply mb-2 flex items-center justify-between gap-3;
+  }
+
+  .quick-strip-toggle {
+    @apply inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-600 transition hover:border-mint hover:text-mint;
   }
 
   .quick-strip-content {
@@ -234,12 +225,12 @@ body {
     @apply flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2;
   }
 
-  .quick-section-title {
-    @apply text-[11px] font-bold uppercase tracking-wide text-slate-400;
+  .quick-question-rail {
+    @apply flex gap-2 overflow-x-auto pb-1;
   }
 
-  .quick-question-grid {
-    @apply thin-scroll grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2;
+  .quick-question-chip {
+    @apply min-w-[210px] max-w-[280px] shrink-0 whitespace-normal;
   }
 
   .xdent-chat-messages {
@@ -448,8 +439,9 @@ body {
 .dark .agent-handoff-toggle,
 .dark .agent-preset,
 .dark .quick-tool-row,
+.dark .quick-strip-toggle,
 .dark .font-size-button,
-.dark .quick-strip summary::after {
+.dark .quick-question-chip {
   background: #0f172a;
   border-color: #334155;
   color: #e2e8f0;

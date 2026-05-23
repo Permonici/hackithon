@@ -564,6 +564,7 @@ function QuickQuestionsStrip({
   onCycleFont: () => void;
   onForgetMemory: () => void;
 }) {
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [copiedEscalation, setCopiedEscalation] = useState(false);
   const memoryItems = memoryChips(memory);
   const memorySummary = memoryUpdates.length
@@ -584,67 +585,81 @@ function QuickQuestionsStrip({
   }
 
   return (
-    <details className="quick-strip">
-      <summary>
-        <span>Rychle volby</span>
-        <span className="text-slate-400">dotazy, pamet, eskalace</span>
-      </summary>
-      <div className="quick-strip-content">
-        <div className="quick-tool-row">
-          <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
-          <button
-            className="font-size-button font-size-button-a"
-            type="button"
-            title="Zvětšení písma"
-            aria-label="Zvětšení písma"
-            onClick={onCycleFont}
-          >
-            A
-          </button>
+    <section className="quick-strip" aria-label="Rychle volby">
+      <div className="quick-strip-head">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-ink">Caste dotazy</div>
+          <div className="truncate text-[11px] text-slate-500">Posunte do stran a vyberte pripraveny dotaz.</div>
         </div>
-
-        <div className="quick-tool-row">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
-            <div className="truncate text-xs text-slate-500">{memorySummary}</div>
-          </div>
-          {memoryItems.length > 0 && (
-            <button className="memory-forget" type="button" onClick={onForgetMemory}>
-              Zapomenout
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {memoryItems.length > 0
-            ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
-            : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
-        </div>
-
-        <div className="quick-tool-row">
-          <div className="min-w-0">
-            <div className="text-xs font-semibold text-ink">Eskalace</div>
-            <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
-          </div>
-          <button
-            className="quick-action"
-            type="button"
-            onClick={() => { void copyEscalation(); }}
-            disabled={!escalationPacket}
-          >
-            {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
-          </button>
-        </div>
-
-        <div className="quick-section-title">Caste dotazy</div>
-        <div className="quick-question-grid">
-          {questions.map((question) => (
-            <button key={question} className="sample-chip" type="button" onClick={() => onPickQuestion(question)}>
-              {question}
-            </button>
-          ))}
-        </div>
+        <button
+          className="quick-strip-toggle"
+          type="button"
+          onClick={() => setToolsOpen((value) => !value)}
+          aria-expanded={toolsOpen}
+          title="Pamet pacienta, eskalace a pismo"
+        >
+          {toolsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          Nastroje
+        </button>
       </div>
-    </details>
+
+      <div className="quick-question-rail thin-scroll" aria-label="Caste dotazy">
+        {questions.map((question) => (
+          <button key={question} className="sample-chip quick-question-chip" type="button" onClick={() => onPickQuestion(question)}>
+            {question}
+          </button>
+        ))}
+      </div>
+
+      {toolsOpen && (
+        <div className="quick-strip-content">
+          <div className="quick-tool-row">
+            <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
+            <button
+              className="font-size-button font-size-button-a"
+              type="button"
+              title="Zvětšení písma"
+              aria-label="Zvětšení písma"
+              onClick={onCycleFont}
+            >
+              A
+            </button>
+          </div>
+
+          <div className="quick-tool-row">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
+              <div className="truncate text-xs text-slate-500">{memorySummary}</div>
+            </div>
+            {memoryItems.length > 0 && (
+              <button className="memory-forget" type="button" onClick={onForgetMemory}>
+                Zapomenout
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {memoryItems.length > 0
+              ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
+              : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
+          </div>
+
+          <div className="quick-tool-row">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-ink">Eskalace</div>
+              <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
+            </div>
+            <button
+              className="quick-action"
+              type="button"
+              onClick={() => { void copyEscalation(); }}
+              disabled={!escalationPacket}
+            >
+              {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -878,7 +893,7 @@ function mergeFrequentQuestions(frequent: string[], samples: string[]): string[]
     const cleaned = question.trim();
     if (!cleaned || merged.includes(cleaned)) continue;
     merged.push(cleaned);
-    if (merged.length >= 6) break;
+    if (merged.length >= 10) break;
   }
   return merged;
 }
