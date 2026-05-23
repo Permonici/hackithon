@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCacheStats, fetchStats, ingestData, sendChatStream } from "./api";
-import type { AgentStep, CacheStats, ChatMessage, RetrievalTolerance, Source, StatsResponse } from "./types";
+import type { AgentStep, CacheStats, ChatMessage, ChatResponse, RetrievalTolerance, Source, StatsResponse } from "./types";
 
 const STORAGE_MESSAGES = "xdent.chat.messages";
 const STORAGE_SESSION = "xdent.chat.session";
@@ -34,7 +34,7 @@ const emptySteps: AgentStep[] = [
   { id: "classify", label: "Tema", status: "queued", detail: "Cekam na dotaz." },
   { id: "retrieve", label: "Retrieval", status: "queued", detail: "Pripraveno vyhledat podobne hovory." },
   { id: "validate", label: "Jistota", status: "queued", detail: "Overim, jestli zdroje staci." },
-  { id: "answer", label: "Odpoved", status: "queued", detail: "Vysledek bude kratky a se zdrojem." }
+  { id: "answer", label: "Odpoved", status: "queued", detail: "Vysledek bude kratky a overeny podle podkladu." }
 ];
 
 function App() {
@@ -129,7 +129,7 @@ function App() {
   const speak = useCallback((text: string) => {
     if (!voiceOutputEnabled || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const cleaned = text.replace(/Zdroj:.*$/m, "").replace(/\[.*?\]/g, "").trim();
+    const cleaned = stripSourceLines(text).replace(/\[.*?\]/g, "").trim();
     const utterance = new SpeechSynthesisUtterance(cleaned);
     utterance.lang = "cs-CZ";
     utterance.rate = 1;
@@ -223,7 +223,9 @@ function App() {
   }
 
   async function copyHistory() {
-    const transcript = messages.map((item) => `${item.role === "user" ? "Uzivatel" : "Asistent"}: ${item.content}`).join("\n\n");
+    const transcript = messages
+      .map((item) => `${item.role === "user" ? "Uzivatel" : "Asistent"}: ${item.role === "assistant" ? stripSourceLines(item.content) : item.content}`)
+      .join("\n\n");
     await navigator.clipboard?.writeText(transcript);
   }
 
@@ -259,7 +261,11 @@ function App() {
 
           <div className="xdent-chat-status">
             <StatusChip ok={isIndexed} icon={<Database size={14} />} label={isIndexed ? "Index pripraven" : "Index prazdny"} />
-            {topFrequent && <span className="truncate text-xs text-slate-500">Casto: {topFrequent}</span>}
+            {topFrequent && (
+              <button className="truncate text-left text-xs text-slate-500 hover:text-ocean" onClick={() => setMessage(topFrequent)} title="Vlozit nejcastejsi dotaz">
+                Casto: {topFrequent}
+              </button>
+            )}
           </div>
 
           {!isIndexed && (
@@ -360,7 +366,7 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
         Pripraveno na dotaz
       </div>
       <p className="text-sm leading-6 text-slate-600">
-        Asistent odpovida kratce podle zdroju z transkripci. V odpovedi uvidite i silu zdroje.
+        Asistent odpovida kratce podle transkripci. U odpovedi uvidite jistotu a rozklikatelne podklady.
         {voiceOutputEnabled && " Hlasovy vystup je zapnuty a cte cesky."}
       </p>
     </div>
@@ -370,10 +376,12 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
+  const visibleContent = isUser ? message.content : stripSourceLines(message.content);
+  const answerConfidence = answerConfidencePercent(message.response);
   const sourceStrength = sourceStrengthPercent(message.response?.sources ?? []);
 
   async function copyContent() {
-    await navigator.clipboard?.writeText(message.content);
+    await navigator.clipboard?.writeText(visibleContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   }
@@ -390,12 +398,21 @@ function ChatBubble({ message }: { message: ChatMessage }) {
             </button>
           </div>
         </div>
-        <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+        <p className="whitespace-pre-wrap text-sm leading-6">{visibleContent}</p>
         {!isUser && message.response && (
           <div className="mt-3 grid gap-2 text-xs">
             <div className="rounded-md bg-white/70 p-2 text-slate-600">
               <div className="mb-1 flex items-center justify-between">
-                <span>Sila zdroje</span>
+                <span>Jistota odpovedi</span>
+                <span className="font-semibold text-ink">{answerConfidence}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-slate-200">
+                <div className="h-1.5 rounded-full bg-ocean" style={{ width: `${answerConfidence}%` }} />
+              </div>
+            </div>
+            <div className="rounded-md bg-white/70 p-2 text-slate-600">
+              <div className="mb-1 flex items-center justify-between">
+                <span>Sila podkladu</span>
                 <span className="font-semibold text-ink">{sourceStrength}%</span>
               </div>
               <div className="h-1.5 rounded-full bg-slate-200">
@@ -470,6 +487,27 @@ function sourceStrengthPercent(sources: Source[]): number {
   const best = Math.max(0, ...sources.map((source) => source.score));
   if (!best) return 0;
   return Math.max(1, Math.min(100, Math.round(best * 100)));
+}
+
+function answerConfidencePercent(response?: ChatResponse): number {
+  if (!response) return 0;
+  if (typeof response.answer_confidence === "number") {
+    return Math.max(0, Math.min(100, Math.round(response.answer_confidence * 100)));
+  }
+  const topicConfidence = Math.max(0, Math.min(1, response.confidence ?? 0));
+  const sourceStrength = Math.max(0, Math.min(1, Math.max(0, ...response.sources.map((source) => source.score))));
+  const combined = response.sources.length > 0
+    ? (topicConfidence * 0.45) + (sourceStrength * 0.55)
+    : topicConfidence * 0.6;
+  return Math.max(1, Math.min(100, Math.round(combined * 100)));
+}
+
+function stripSourceLines(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !line.trim().toLowerCase().startsWith("zdroj:"))
+    .join("\n")
+    .trim();
 }
 
 function loadJson<T>(key: string, fallback: T): T {

@@ -8,6 +8,7 @@ from math import ceil
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from xdent_assistant.models import TopicResult
 
 from .cache import QueryCache
 from .clinics import assess_urgency, find_nearby_clinics, reserve_earliest_slot
@@ -23,7 +24,7 @@ from .schemas import (
     UsageEstimate,
     UserInfo,
 )
-from .topics import classify_topic
+from .topics import classify_topic, label_for
 from .utils import append_jsonl, utc_now
 from .vectorstore import search_sources
 
@@ -57,7 +58,7 @@ Nesmíš míchat nesouvisející úryvky. Pokud zdroj popisuje jiný problém, i
 Dej konkrétní postup jen tehdy, když je ve zdrojích opravdu uvedený.
 Urgenci pacienta použij jen pro doporučení priority dalšího postupu, ne pro vymýšlení neověřených řešení.
 Pokud zdroje nestačí, řekni to a doporuč eskalaci na podporu.
-Na konec uveď krátký řádek `Zdroj: ...` a použij přesný název zdroje z kontextu, ne pouze číslo v hranaté závorce.
+Do textu odpovědi nikdy nepiš řádek `Zdroj:`; zdroje se uživateli ukazují samostatně v tlačítku.
 Nevymýšlej postupy mimo kontext."""
 
 
@@ -137,6 +138,19 @@ class SupportAgent:
             topic_hint=topic_hint,
             tolerance=retrieval_tolerance,
         )
+        classified = self._refine_topic(classified, retrieved_sources)
+        steps[0] = AgentStep(
+            id="classify",
+            label="Rozpoznání tématu",
+            status="done" if classified.topic else "warning",
+            detail=f"Dotaz spadá do oblasti: {classified.label}.",
+            payload={
+                "topic": classified.topic,
+                "label": classified.label,
+                "confidence": classified.confidence,
+                "method": "keywords+retrieval",
+            },
+        )
         sources = self._select_answer_sources(retrieved_sources, classified.topic)
         best_score = max((source.score for source in sources), default=0.0)
         steps.append(
@@ -193,8 +207,7 @@ class SupportAgent:
             answer = (
                 f"Téma: {classified.label}.\n"
                 "V dostupných transkripcích k tomu nemám dost jistý podklad. "
-                "Předejte dotaz 2. úrovni podpory a přiložte přesnou chybovou hlášku nebo screenshot.\n"
-                "Zdroj: nedostatečný kontext"
+                "Předejte dotaz 2. úrovni podpory a přiložte přesnou chybovou hlášku nebo screenshot."
             )
             used_llm = False
             answer_status = "done"
@@ -228,6 +241,8 @@ class SupportAgent:
         if care_result:
             answer = self._compose_care_answer(care_result, sources if grounded else [])
 
+        answer = self._strip_source_lines(answer)
+
         steps.append(
             AgentStep(
                 id="answer",
@@ -243,6 +258,7 @@ class SupportAgent:
             topic=classified.topic or "unknown",
             topic_label=classified.label,
             confidence=classified.confidence,
+            answer_confidence=self._answer_confidence(classified.confidence, sources, grounded),
             sources=sources,
             steps=steps,
             escalation_packet=escalation_packet,
@@ -301,16 +317,14 @@ class SupportAgent:
         if not sources:
             return (
                 f"Téma: {topic_label}.\n"
-                "V dostupných transkripcích k tomu nemám dost jistý podklad. Předejte dotaz podpoře.\n"
-                "Zdroj: nedostatečný kontext"
+                "V dostupných transkripcích k tomu nemám dost jistý podklad. Předejte dotaz podpoře."
             ), False
 
         best = sources[0]
         resolution = best.resolution or best.summary or best.excerpt
         return (
             f"Téma: {topic_label}.\n"
-            f"Podle dostupných hovorů: {resolution}\n"
-            f"Zdroj: {best.source}"
+            f"Podle dostupných hovorů: {resolution}"
         ), False
 
     def _run_care_workflow(self, message: str, user: UserInfo | None) -> CareWorkflowResult:
@@ -423,7 +437,6 @@ class SupportAgent:
             lines.append("Dalsi dostupne moznosti: " + "; ".join(clinic_parts))
 
         lines.append("Pozn.: terminy jsou demo predrezervace; v ostrem provozu se napoji primo na kalendar XDENT.")
-        lines.append(f"Zdroj: {sources[0].source if sources else 'demo adresar ordinaci + pacientsky workflow'}")
         return "\n".join(lines)
 
     def _needs_escalation(self, care: CareWorkflowResult) -> bool:
@@ -563,6 +576,52 @@ class SupportAgent:
                 return value.strip()
         return None
 
+    def _refine_topic(self, classified: TopicResult, sources: list[Source]) -> TopicResult:
+        topic_weights: dict[str, float] = {}
+        for source in sources[:8]:
+            if not source.topic:
+                continue
+            weight = max(0.01, min(float(source.score), 1.0))
+            topic_weights[source.topic] = topic_weights.get(source.topic, 0.0) + weight
+
+        if not topic_weights:
+            return classified
+
+        best_topic, best_weight = max(topic_weights.items(), key=lambda item: item[1])
+        total_weight = sum(topic_weights.values())
+        source_confidence = round(best_weight / total_weight, 3) if total_weight else 0.0
+
+        should_use_retrieval_topic = (
+            classified.topic is None
+            or classified.confidence < 0.55
+            or (best_topic != classified.topic and source_confidence >= 0.62)
+        )
+        if not should_use_retrieval_topic:
+            return classified
+
+        return TopicResult(
+            topic=best_topic,
+            label=label_for(best_topic),
+            confidence=max(classified.confidence, source_confidence),
+        )
+
+    def _strip_source_lines(self, answer: str) -> str:
+        visible_lines = [
+            line
+            for line in answer.splitlines()
+            if not line.strip().lower().startswith("zdroj:")
+        ]
+        return "\n".join(visible_lines).strip()
+
+    def _answer_confidence(self, topic_confidence: float, sources: list[Source], grounded: bool) -> float:
+        if not grounded:
+            return 0.0
+        normalized_topic = max(0.0, min(float(topic_confidence), 1.0))
+        best_source = max((max(0.0, min(float(source.score), 1.0)) for source in sources), default=0.0)
+        if not sources:
+            return round(normalized_topic * 0.6, 3)
+        return round((normalized_topic * 0.45) + (best_source * 0.55), 3)
+
     def _select_answer_sources(self, sources: list[Source], topic: str | None) -> list[Source]:
         if not sources:
             return []
@@ -693,9 +752,11 @@ class SupportAgent:
                 "topic": response.topic,
                 "topic_label": response.topic_label,
                 "confidence": response.confidence,
+                "answer_confidence": response.answer_confidence,
                 "sources": [source.model_dump() for source in response.sources],
                 "used_llm": response.used_llm,
                 "session_id": response.session_id,
+                "review_ready": True,
                 "retrieval_tolerance": response.retrieval_tolerance,
                 "user": response.user.model_dump() if response.user else None,
                 "usage": response.usage.model_dump() if response.usage else None,

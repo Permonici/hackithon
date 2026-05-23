@@ -86,6 +86,7 @@ export type ChatResponse = {
   topic: string;
   topic_label: string;
   confidence: number;
+  answer_confidence?: number | null;
   sources: Source[];
   steps: AgentStep[];
   escalation_packet?: string | null;

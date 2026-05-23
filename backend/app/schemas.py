@@ -100,6 +100,7 @@ class ChatResponse(BaseModel):
     topic: str
     topic_label: str
     confidence: float
+    answer_confidence: float | None = None
     sources: list[Source]
     steps: list[AgentStep]
     escalation_packet: str | None = None
