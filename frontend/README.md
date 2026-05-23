@@ -15,13 +15,14 @@ React + Tailwind konzole pro demonstraci XDENT asistenta.
 - light/dark mode a zvetseni pisma,
 - rezimy tolerance hledani v chuncich,
 - hlasovy vstup pres mikrofon,
-- volitelne cteni odpovedi nahlas s muzskym nebo zenskym hlasovym profilem,
+- volitelne cteni odpovedi nahlas s volbou jazyka hlasu,
 - rozkliknuti zdroju primo u odpovedi,
 - realtime agent timeline,
 - evidence cards z transkripci,
 - coverage temat,
 - strict mode,
 - eskalacni balicek pro 2. uroven podpory,
+- skladaci pravy panel, aby demo zustalo prehledne,
 - status OpenAI/Qdrant.
 
 ## Lokalni spusteni bez Dockeru

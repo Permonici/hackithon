@@ -105,6 +105,7 @@ class SupportAgent:
         # ── cache lookup ──────────────────────────────────────────────────────
         cache = get_agent_cache(self.settings)
         cache_key, normalized_query = cache.build_key(message, strict_mode, retrieval_tolerance, top_k)
+        cache.record_query(normalized_query)
         can_use_cache = not self._has_case_context(user)
         cached = cache.get(cache_key) if can_use_cache else None
         if cached is not None:

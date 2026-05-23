@@ -54,6 +54,12 @@ class QueryCache:
                 return None
             return value
 
+    def record_query(self, normalized_query: str) -> None:
+        with self._lock:
+            self._freq[normalized_query] = self._freq.get(normalized_query, 0) + 1
+            if self._freq[normalized_query] >= FREQUENT_THRESHOLD:
+                self._persist_freq()
+
     def put(
         self,
         key: str,
@@ -65,9 +71,6 @@ class QueryCache:
             if len(self._store) >= MAX_CACHE_SIZE:
                 self._evict()
             self._store[key] = (value, time.monotonic() + ttl)
-            self._freq[normalized_query] = self._freq.get(normalized_query, 0) + 1
-            if self._freq[normalized_query] >= FREQUENT_THRESHOLD:
-                self._persist_freq()
 
     def stats(self) -> dict[str, Any]:
         with self._lock:

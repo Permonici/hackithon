@@ -4,6 +4,7 @@ import {
   Building2,
   CalendarCheck,
   CalendarPlus,
+  ChevronDown,
   CheckCircle2,
   Clock3,
   Copy,
@@ -84,22 +85,28 @@ const toleranceOptions: Array<{ value: RetrievalTolerance; label: string; hint: 
   { value: "broad", label: "Širší", hint: "víc tolerance" }
 ];
 
+const voiceLanguageOptions: Array<{ value: VoiceLanguage; label: string; hint: string }> = [
+  { value: "cs-CZ", label: "Cesky", hint: "CZ" },
+  { value: "sk-SK", label: "Slovensky", hint: "SK" },
+  { value: "en-US", label: "English", hint: "US" }
+];
+
 const STORAGE_MESSAGES = "xdent.chat.messages";
 const STORAGE_USER = "xdent.chat.user";
 const STORAGE_TOLERANCE = "xdent.chat.tolerance";
 const STORAGE_SESSION = "xdent.chat.session";
 const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
-const STORAGE_VOICE_GENDER = "xdent.chat.voiceGender";
+const STORAGE_VOICE_LANGUAGE = "xdent.chat.voiceLanguage";
 const STORAGE_VOICE_URI = "xdent.chat.voiceUri";
 const STORAGE_THEME = "xdent.ui.theme";
 const STORAGE_FONT_SIZE = "xdent.ui.fontSize";
 
-type VoiceGender = "female" | "male";
+type VoiceLanguage = "cs-CZ" | "sk-SK" | "en-US";
 type ThemeMode = "light" | "dark";
 type FontSizeMode = "normal" | "large" | "xlarge";
 
 function App() {
-  const [activeTab, setActiveTab] = useState<"chat" | "history">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "history" | "faq">("chat");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadJson<ThemeMode>(STORAGE_THEME, "light"));
   const [fontSizeMode, setFontSizeMode] = useState<FontSizeMode>(() => loadJson<FontSizeMode>(STORAGE_FONT_SIZE, "normal"));
   const [message, setMessage] = useState(demoQuestions[0]);
@@ -125,8 +132,8 @@ function App() {
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() =>
     loadJson<boolean>(STORAGE_VOICE_OUTPUT, false)
   );
-  const [voiceGender, setVoiceGender] = useState<VoiceGender>(() =>
-    loadJson<VoiceGender>(STORAGE_VOICE_GENDER, "female")
+  const [voiceLanguage, setVoiceLanguage] = useState<VoiceLanguage>(() =>
+    loadJson<VoiceLanguage>(STORAGE_VOICE_LANGUAGE, "cs-CZ")
   );
   const [preferredVoiceURI, setPreferredVoiceURI] = useState(() =>
     loadJson<string>(STORAGE_VOICE_URI, "")
@@ -150,7 +157,7 @@ function App() {
   const topScore = Math.max(0, ...sources.map((source) => source.score));
   const fontScaleClass = fontSizeMode === "xlarge" ? "font-xlarge" : fontSizeMode === "large" ? "font-large" : "font-normal";
   const mapClinics = visibleResponse?.clinics?.length ? visibleResponse.clinics : clinicDirectory;
-  const selectedVoice = selectAssistantVoice(ttsVoices, voiceGender, preferredVoiceURI);
+  const selectedVoice = selectAssistantVoice(ttsVoices, voiceLanguage, preferredVoiceURI);
 
   const topicCoverage = useMemo(() => {
     const counts = stats?.topics.map((topic) => topic.chunks) ?? [];
@@ -168,7 +175,7 @@ function App() {
   useEffect(() => { saveJson(STORAGE_USER, userInfo); }, [userInfo]);
   useEffect(() => { saveJson(STORAGE_TOLERANCE, retrievalTolerance); }, [retrievalTolerance]);
   useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
-  useEffect(() => { saveJson(STORAGE_VOICE_GENDER, voiceGender); }, [voiceGender]);
+  useEffect(() => { saveJson(STORAGE_VOICE_LANGUAGE, voiceLanguage); }, [voiceLanguage]);
   useEffect(() => { saveJson(STORAGE_VOICE_URI, preferredVoiceURI); }, [preferredVoiceURI]);
   useEffect(() => { saveJson(STORAGE_THEME, themeMode); }, [themeMode]);
   useEffect(() => { saveJson(STORAGE_FONT_SIZE, fontSizeMode); }, [fontSizeMode]);
@@ -218,7 +225,7 @@ function App() {
 
     recognitionRef.current?.abort();
     const recognition = new SR();
-    recognition.lang = "cs-CZ";
+    recognition.lang = voiceLanguage;
     recognition.continuous = false;
     recognition.interimResults = true;
 
@@ -252,9 +259,9 @@ function App() {
     // Strip markdown/source annotations for cleaner TTS.
     const cleaned = text.replace(/Zdroj:.*$/m, "").replace(/\[.*?\]/g, "").trim();
     const utterance = new SpeechSynthesisUtterance(cleaned);
-    utterance.lang = "cs-CZ";
-    utterance.rate = voiceGender === "female" ? 1.03 : 0.96;
-    utterance.pitch = voiceGender === "female" ? 1.18 : 0.82;
+    utterance.lang = voiceLanguage;
+    utterance.rate = voiceLanguage === "en-US" ? 0.98 : 1.0;
+    utterance.pitch = 1.0;
 
     if (selectedVoice) utterance.voice = selectedVoice;
 
@@ -263,7 +270,7 @@ function App() {
     utterance.onerror = () => setIsSpeaking(false);
 
     window.speechSynthesis.speak(utterance);
-  }, [voiceOutputEnabled, selectedVoice, voiceGender]);
+  }, [voiceOutputEnabled, selectedVoice, voiceLanguage]);
 
   function stopSpeaking() {
     window.speechSynthesis?.cancel();
@@ -399,6 +406,7 @@ function App() {
 
           <nav className="flex flex-wrap items-center gap-2">
             <TabButton active={activeTab === "chat"} icon={<MessageSquare size={17} />} label="Chat" onClick={() => setActiveTab("chat")} />
+            <TabButton active={activeTab === "faq"} icon={<Star size={17} />} label="Časté dotazy" onClick={() => setActiveTab("faq")} />
             <TabButton active={activeTab === "history"} icon={<History size={17} />} label="Historie" onClick={() => setActiveTab("history")} />
           </nav>
 
@@ -535,12 +543,12 @@ function App() {
               voiceInputSupported={voiceInputSupported}
               voiceOutputSupported={voiceOutputSupported}
               voiceOutputEnabled={voiceOutputEnabled}
-              voiceGender={voiceGender}
+              voiceLanguage={voiceLanguage}
               voices={ttsVoices}
               selectedVoiceURI={preferredVoiceURI}
               selectedVoiceName={selectedVoice?.name ?? null}
               onVoiceOutputChange={setVoiceOutputEnabled}
-              onVoiceGenderChange={setVoiceGender}
+              onVoiceLanguageChange={setVoiceLanguage}
               onVoiceURIChange={setPreferredVoiceURI}
               isListening={isListening}
               isSpeaking={isSpeaking}
@@ -560,14 +568,27 @@ function App() {
             <EscalationPanel response={visibleResponse} />
           </aside>
         </main>
+        <ClinicMapSection clinics={mapClinics} response={visibleResponse} />
         <BottomWorkflowBar
           response={visibleResponse}
           cacheStats={cacheStats}
           userInfo={userInfo}
           onCareSubmit={handleCareRequest}
+          onShowFaq={() => setActiveTab("faq")}
+          onShowHistory={() => setActiveTab("history")}
         />
-        <ClinicMapSection clinics={mapClinics} response={visibleResponse} />
         </>
+      )}
+
+      {activeTab === "faq" && (
+        <FaqView
+          cacheStats={cacheStats}
+          onRefreshCache={refreshCacheStats}
+          onAsk={(query) => {
+            setMessage(query);
+            setActiveTab("chat");
+          }}
+        />
       )}
 
       {activeTab === "history" && (
@@ -596,6 +617,21 @@ function sourcesFromSteps(steps: AgentStep[]): Source[] {
   const retrieveStep = steps.find((step) => step.id === "retrieve");
   const payloadSources = retrieveStep?.payload?.sources;
   return Array.isArray(payloadSources) ? (payloadSources as Source[]) : [];
+}
+
+function getFrequentQuestions(cacheStats: CacheStats | null): Array<{ query: string; count: number }> {
+  const fromStats = (cacheStats?.top_frequent ?? [])
+    .filter((item) => item.query.trim())
+    .sort((left, right) => right.count - left.count);
+  if (fromStats.length > 0) return fromStats;
+  return [
+    { query: "Nejde odeslat eRecept nebo ePoukaz, co mam zkontrolovat?", count: 18 },
+    { query: "Jak opravit prihlaseni po instalaci certifikatu?", count: 14 },
+    { query: "Kde v kalendari zmenim nebo presunu termin pacienta?", count: 11 },
+    { query: "Proc se dokument netiskne spravne a jak upravit sablonu?", count: 9 },
+    { query: "Jak najit nejdrivejsi termin pro akutniho pacienta?", count: 7 },
+    { query: "Ktera ordinace prijima nove pacienty na dentalni hygienu?", count: 6 }
+  ];
 }
 
 // ── components ─────────────────────────────────────────────────────────────
@@ -739,8 +775,18 @@ function PatientPanel({
   }
 
   return (
-    <section className="panel">
-      <div className="mb-4 flex items-start justify-between gap-3">
+    <CollapsiblePanel
+      icon={<User size={19} />}
+      title="Pacient / pripad"
+      subtitle="Uklada se lokalne v prohlizeci"
+      defaultOpen
+      action={
+        <button className="icon-button h-9 w-9" onClick={onClear} title="Vymazat data pacienta">
+          <Trash2 size={16} />
+        </button>
+      }
+    >
+      <div className="hidden">
         <PanelTitle icon={<User size={19} />} title="Pacient / případ" subtitle="Ukládá se lokálně v prohlížeči" />
         <button className="icon-button h-9 w-9" onClick={onClear} title="Vymazat data pacienta">
           <Trash2 size={16} />
@@ -799,7 +845,7 @@ function PatientPanel({
           <Input label="Verze XDENT" value={userInfo.software_version ?? ""} onChange={(value) => update("software_version", value)} />
         </div>
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
@@ -815,8 +861,8 @@ function RetrievalPanel({
   onRetrievalToleranceChange: (value: RetrievalTolerance) => void;
 }) {
   return (
-    <section className="panel">
-      <PanelTitle icon={<SlidersHorizontal size={19} />} title="Hledání" subtitle="Tolerance v chuncích" />
+    <CollapsiblePanel icon={<SlidersHorizontal size={19} />} title="Hledani" subtitle="Tolerance v chuncich" defaultOpen={false}>
+      <div className="hidden" />
       <div className="grid grid-cols-3 gap-2">
         {toleranceOptions.map((option) => (
           <button
@@ -839,7 +885,7 @@ function RetrievalPanel({
           onChange={(event) => onStrictModeChange(event.target.checked)}
         />
       </label>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
@@ -847,12 +893,12 @@ function VoicePanel({
   voiceInputSupported,
   voiceOutputSupported,
   voiceOutputEnabled,
-  voiceGender,
+  voiceLanguage,
   voices,
   selectedVoiceURI,
   selectedVoiceName,
   onVoiceOutputChange,
-  onVoiceGenderChange,
+  onVoiceLanguageChange,
   onVoiceURIChange,
   isListening,
   isSpeaking,
@@ -863,12 +909,12 @@ function VoicePanel({
   voiceInputSupported: boolean;
   voiceOutputSupported: boolean;
   voiceOutputEnabled: boolean;
-  voiceGender: VoiceGender;
+  voiceLanguage: VoiceLanguage;
   voices: SpeechSynthesisVoice[];
   selectedVoiceURI: string;
   selectedVoiceName: string | null;
   onVoiceOutputChange: (v: boolean) => void;
-  onVoiceGenderChange: (v: VoiceGender) => void;
+  onVoiceLanguageChange: (v: VoiceLanguage) => void;
   onVoiceURIChange: (v: string) => void;
   isListening: boolean;
   isSpeaking: boolean;
@@ -876,11 +922,10 @@ function VoicePanel({
   onStopListening: () => void;
   onStopSpeaking: () => void;
 }) {
-  const sortedVoices = sortVoices(voices, voiceGender);
+  const sortedVoices = sortVoices(voices, voiceLanguage);
 
   return (
-    <section className="panel">
-      <PanelTitle icon={<Mic size={19} />} title="Hlas" subtitle="Hlasový vstup & výstup (cs-CZ)" />
+    <CollapsiblePanel icon={<Mic size={19} />} title="Hlas" subtitle="Vstup a cteni odpovedi" defaultOpen={false}>
       <div className="space-y-3">
         {/* Voice input */}
         <div className="rounded-md border border-slate-200 bg-white p-3">
@@ -931,24 +976,22 @@ function VoicePanel({
                 </button>
               </label>
               <div>
-                <div className="mb-2 text-xs font-medium uppercase text-slate-400">Typ hlasu</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className={`mode-button min-h-12 ${voiceGender === "female" ? "mode-button-active" : ""}`}
-                    onClick={() => onVoiceGenderChange("female")}
-                  >
-                    <span>Ženský</span>
-                    <small>jemnější TTS</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={`mode-button min-h-12 ${voiceGender === "male" ? "mode-button-active" : ""}`}
-                    onClick={() => onVoiceGenderChange("male")}
-                  >
-                    <span>Mužský</span>
-                    <small>hlubší TTS</small>
-                  </button>
+                <div className="mb-2 text-xs font-medium uppercase text-slate-400">Jazyk hlasu</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {voiceLanguageOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`mode-button min-h-12 ${voiceLanguage === option.value ? "mode-button-active" : ""}`}
+                      onClick={() => {
+                        onVoiceLanguageChange(option.value);
+                        onVoiceURIChange("");
+                      }}
+                    >
+                      <span>{option.label}</span>
+                      <small>{option.hint}</small>
+                    </button>
+                  ))}
                 </div>
                 <div className="mt-2 truncate text-xs text-slate-500">
                   Vybraný hlas: {selectedVoiceName ?? "výchozí hlas prohlížeče"}
@@ -983,20 +1026,20 @@ function VoicePanel({
           )}
         </div>
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
 function AgentPanel({ steps, loading }: { steps: AgentStep[]; loading: boolean }) {
   return (
-    <section className="panel">
-      <PanelTitle icon={<Activity size={19} />} title="Průběh agenta" subtitle="Realtime stav" />
+    <CollapsiblePanel icon={<Activity size={19} />} title="Prubeh agenta" subtitle="Realtime stav" defaultOpen={false}>
+      <div className="hidden" />
       <div className="space-y-3">
         {steps.map((step, index) => (
           <StepItem key={step.id} step={step} index={index} active={loading && step.status === "running"} />
         ))}
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
@@ -1030,8 +1073,7 @@ function CarePanel({
   ];
 
   return (
-    <section className="panel care-agent-panel">
-      <PanelTitle icon={<CalendarCheck size={19} />} title="Pacientsky agent" subtitle="Napiste mu, co ma najit" />
+    <CollapsiblePanel icon={<CalendarCheck size={19} />} title="Pacientsky agent" subtitle="Napiste mu, co ma najit" defaultOpen>
       <form className="mb-4 space-y-3" onSubmit={submitCare}>
         <textarea
           className="field-input min-h-24 resize-none"
@@ -1082,7 +1124,7 @@ function CarePanel({
           <ClinicSlotCard key={`${clinic.name}-${index}`} clinic={clinic} rank={index + 1} compact />
         ))}
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
@@ -1154,8 +1196,8 @@ function EvidencePanel({
 
 function CoveragePanel({ topicCoverage }: { topicCoverage: Array<{ topic: string; label: string; chunks: number; width: number }> }) {
   return (
-    <section className="panel">
-      <PanelTitle icon={<Gauge size={19} />} title="Pokrytí" subtitle="Témata v indexu" />
+    <CollapsiblePanel icon={<Gauge size={19} />} title="Pokryti" subtitle="Temata v indexu" defaultOpen={false}>
+      <div className="hidden" />
       <div className="space-y-3">
         {topicCoverage.length === 0 && <EmptyState text="Po indexaci se zobrazí témata." />}
         {topicCoverage.map((topic) => (
@@ -1170,18 +1212,61 @@ function CoveragePanel({ topicCoverage }: { topicCoverage: Array<{ topic: string
           </div>
         ))}
       </div>
-    </section>
+    </CollapsiblePanel>
   );
 }
 
 function EscalationPanel({ response }: { response: ChatResponse | null }) {
   return (
-    <section className="panel">
-      <PanelTitle icon={<ShieldCheck size={19} />} title="Eskalace" subtitle="Fallback výstup" />
+    <CollapsiblePanel icon={<ShieldCheck size={19} />} title="Eskalace" subtitle="Fallback vystup" defaultOpen={Boolean(response?.escalation_packet)}>
+      <div className="hidden" />
       <pre className="thin-scroll max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
         {response?.escalation_packet ?? "Bez eskalace."}
       </pre>
-    </section>
+    </CollapsiblePanel>
+  );
+}
+
+function FaqView({
+  cacheStats,
+  onRefreshCache,
+  onAsk
+}: {
+  cacheStats: CacheStats | null;
+  onRefreshCache: () => void;
+  onAsk: (query: string) => void;
+}) {
+  const frequent = getFrequentQuestions(cacheStats);
+  return (
+    <main className="mx-auto max-w-7xl px-5 py-5">
+      <section className="panel">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <PanelTitle icon={<Star size={19} />} title="Nejcastejsi dotazy" subtitle="Serazeno podle poctu opakovani" />
+          <button className="icon-button" onClick={onRefreshCache} title="Obnovit dotazy">
+            <RefreshCw size={18} />
+          </button>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {frequent.map((item, index) => (
+            <button
+              key={`${item.query}-${index}`}
+              className="faq-card"
+              type="button"
+              onClick={() => onAsk(item.query)}
+            >
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-mint/10 text-sm font-bold text-mint">
+                {index + 1}
+              </span>
+              <span className="min-w-0 text-left">
+                <span className="line-clamp-2 text-sm font-semibold text-ink">{item.query}</span>
+                <span className="mt-1 block text-xs text-slate-500">{item.count}x opakovano</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </main>
   );
 }
 
@@ -1201,6 +1286,7 @@ function HistoryView({
   onRefreshCache: () => void;
 }) {
   const answered = messages.filter((item) => item.role === "assistant" && item.response).length;
+  const frequent = getFrequentQuestions(cacheStats);
   return (
     <main className="mx-auto max-w-7xl px-5 py-5">
       <section className="panel">
@@ -1251,11 +1337,11 @@ function HistoryView({
               <RefreshCw size={15} />
             </button>
           </div>
-          {!cacheStats || cacheStats.top_frequent.length === 0 ? (
+          {frequent.length === 0 ? (
             <EmptyState text="Zatim bez opakovanych dotazu." />
           ) : (
             <div className="grid gap-2 md:grid-cols-2">
-              {cacheStats.top_frequent.slice(0, 6).map((item, index) => (
+              {frequent.slice(0, 6).map((item, index) => (
                 <div key={`${item.query}-${index}`} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
                   <div className="line-clamp-2 text-slate-700">{item.query}</div>
                   <div className="mt-2 text-xs font-semibold text-mint">{item.count}x</div>
@@ -1271,27 +1357,66 @@ function HistoryView({
 
 // ── small shared components ────────────────────────────────────────────────
 
+function CollapsiblePanel({
+  icon,
+  title,
+  subtitle,
+  defaultOpen = false,
+  action,
+  children
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  defaultOpen?: boolean;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="panel collapsible-panel">
+      <div className="flex items-center justify-between gap-3">
+        <button className="collapsible-trigger" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+          <span className="text-mint">{icon}</span>
+          <span className="min-w-0 text-left">
+            <span className="block text-base font-semibold text-ink">{title}</span>
+            <span className="mt-0.5 block truncate text-sm text-slate-500">{subtitle}</span>
+          </span>
+          <ChevronDown size={17} className={`ml-auto shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+        {action}
+      </div>
+      {open && <div className="mt-4">{children}</div>}
+    </section>
+  );
+}
+
 function BottomWorkflowBar({
   response,
   cacheStats,
   userInfo,
-  onCareSubmit
+  onCareSubmit,
+  onShowFaq,
+  onShowHistory
 }: {
   response: ChatResponse | null;
   cacheStats: CacheStats | null;
   userInfo: UserInfo;
   onCareSubmit: (text: string) => void;
+  onShowFaq: () => void;
+  onShowHistory: () => void;
 }) {
-  const topQuery = cacheStats?.top_frequent[0]?.query ?? "Zatim sbirame dotazy";
+  const frequent = getFrequentQuestions(cacheStats);
+  const topQuery = frequent[0]?.query ?? "Zatim sbirame dotazy";
   const appointment = response?.appointment;
   const contact = userInfo.patient_phone || userInfo.patient_email || userInfo.contact || "kontakt neni vyplnen";
   return (
     <section className="mx-auto max-w-[1600px] px-5 pb-4">
       <div className="bottom-workflow-bar">
-        <WorkflowTile icon={<Star size={18} />} label="Nejcastejsi dotazy" value={topQuery} detail={cacheStats ? `${cacheStats.total_tracked_queries} sledovanych dotazu` : "bez dat"} />
+        <WorkflowTile icon={<Star size={18} />} label="Nejcastejsi dotazy" value={topQuery} detail={`${frequent.length} dotazu podle opakovani`} onClick={onShowFaq} />
         <WorkflowTile icon={<CalendarPlus size={18} />} label="Predobjednani" value={appointment?.slot_start ?? "najit nejblizsi termin"} detail={appointment?.reservation_id ?? "agent doporuci nejdrivejsi slot"} onClick={() => onCareSubmit(buildCarePrompt(userInfo))} />
         <WorkflowTile icon={<Phone size={18} />} label="Kontakty" value={contact} detail={userInfo.patient_city || "doplnte mesto pacienta"} />
-        <WorkflowTile icon={<ShieldCheck size={18} />} label="Eskalace" value={response?.escalation_packet ? "pripravena" : "neni nutna"} detail={response?.triage?.label ?? "bez triage"} />
+        <WorkflowTile icon={<History size={18} />} label="Historie" value="otevrit konverzace" detail="chat history a zdroje" onClick={onShowHistory} />
       </div>
     </section>
   );
@@ -1330,9 +1455,6 @@ function ClinicMapSection({ clinics, response }: { clinics: ClinicOption[]; resp
       <div className="panel">
         <PanelTitle icon={<Map size={19} />} title="Mapa dostupnych ordinaci" subtitle="Zubni pece a dentalni hygiena" />
         <div className="clinic-map">
-          <div className="map-road map-road-a" />
-          <div className="map-road map-road-b" />
-          <div className="map-road map-road-c" />
           {visible.map((clinic, index) => (
             <div
               key={`${clinic.name}-${index}`}
@@ -1340,7 +1462,7 @@ function ClinicMapSection({ clinics, response }: { clinics: ClinicOption[]; resp
               style={{ left: `${clinic.map_x ?? 50}%`, top: `${clinic.map_y ?? 50}%` }}
               title={`${clinic.name} - ${clinic.city}`}
             >
-              {index + 1}
+              <span>{index + 1}</span>
             </div>
           ))}
         </div>
@@ -1634,40 +1756,38 @@ function buildCarePrompt(user: UserInfo): string {
   ].join(" ");
 }
 
-function sortVoices(voices: SpeechSynthesisVoice[], gender: VoiceGender): SpeechSynthesisVoice[] {
-  return [...voices].sort((left, right) => voiceScore(right, gender) - voiceScore(left, gender));
+function sortVoices(voices: SpeechSynthesisVoice[], language: VoiceLanguage): SpeechSynthesisVoice[] {
+  return [...voices].sort((left, right) => voiceScore(right, language) - voiceScore(left, language));
 }
 
-function voiceScore(voice: SpeechSynthesisVoice, gender: VoiceGender): number {
+function voiceScore(voice: SpeechSynthesisVoice, language: VoiceLanguage): number {
   const name = normalizeVoiceName(`${voice.name} ${voice.voiceURI} ${voice.lang}`);
+  const lang = voice.lang.toLowerCase();
+  const target = language.toLowerCase();
+  const base = target.split("-")[0];
   let score = 0;
-  if (voice.lang.toLowerCase().startsWith("cs")) score += 80;
-  if (voice.lang.toLowerCase().startsWith("sk")) score += 25;
+  if (lang === target) score += 90;
+  if (lang.startsWith(base)) score += 65;
+  if (language === "cs-CZ" && lang.startsWith("sk")) score += 18;
+  if (language === "sk-SK" && lang.startsWith("cs")) score += 18;
   if (name.includes("google")) score += 8;
   if (name.includes("microsoft")) score += 10;
   if (voice.localService) score += 3;
-
-  const femaleHints = ["female", "woman", "zena", "zuzana", "vlasta", "iveta", "helena", "jitka", "sara", "katerina", "tereza", "marketa", "lucie"];
-  const maleHints = ["male", "man", "muz", "jakub", "antonin", "petr", "ondrej", "michal", "jan", "jiri", "tomas"];
-  const wanted = gender === "female" ? femaleHints : maleHints;
-  const unwanted = gender === "female" ? maleHints : femaleHints;
-
-  if (wanted.some((hint) => name.includes(normalizeVoiceName(hint)))) score += 60;
-  if (unwanted.some((hint) => name.includes(normalizeVoiceName(hint)))) score -= 60;
   return score;
 }
 
 function selectAssistantVoice(
   voices: SpeechSynthesisVoice[],
-  gender: VoiceGender,
+  language: VoiceLanguage,
   preferredVoiceURI = ""
 ): SpeechSynthesisVoice | null {
   const preferred = voices.find((voice) => voice.voiceURI === preferredVoiceURI);
   if (preferred) return preferred;
 
-  const czechVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("cs"));
-  const candidates = czechVoices.length > 0 ? czechVoices : voices;
-  return sortVoices(candidates, gender)[0] ?? czechVoices[0] ?? voices[0] ?? null;
+  const base = language.toLowerCase().split("-")[0];
+  const languageVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith(base));
+  const candidates = languageVoices.length > 0 ? languageVoices : voices;
+  return sortVoices(candidates, language)[0] ?? voices[0] ?? null;
 }
 
 function toleranceName(value: RetrievalTolerance): string {

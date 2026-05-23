@@ -170,60 +170,35 @@ body {
 
   .clinic-map {
     position: relative;
-    min-height: 260px;
+    min-height: 320px;
     overflow: hidden;
     border-radius: 8px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid rgba(15, 23, 42, 0.12);
     background:
-      linear-gradient(90deg, rgba(226, 232, 240, 0.7) 1px, transparent 1px),
-      linear-gradient(180deg, rgba(226, 232, 240, 0.7) 1px, transparent 1px),
-      linear-gradient(135deg, #f8fafc 0%, #eef8f4 48%, #f6f8fb 100%);
-    background-size: 34px 34px, 34px 34px, auto;
-  }
-
-  .map-road {
-    position: absolute;
-    height: 7px;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, 0.38);
-    transform-origin: center;
-  }
-
-  .map-road-a {
-    left: -4%;
-    top: 42%;
-    width: 110%;
-    transform: rotate(-9deg);
-  }
-
-  .map-road-b {
-    left: 14%;
-    top: 8%;
-    width: 80%;
-    transform: rotate(43deg);
-  }
-
-  .map-road-c {
-    left: 8%;
-    top: 72%;
-    width: 82%;
-    transform: rotate(11deg);
+      linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.28)),
+      url("/aerial-map.svg") center / cover no-repeat;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
   }
 
   .map-pin {
     position: absolute;
     display: flex;
-    width: 30px;
-    height: 30px;
+    width: 34px;
+    height: 34px;
     align-items: center;
     justify-content: center;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -100%);
     border: 3px solid #fff;
-    border-radius: 999px;
+    border-radius: 999px 999px 999px 4px;
     box-shadow: 0 14px 25px rgba(15, 23, 42, 0.2);
     color: #fff;
     font-size: 0.78rem;
     font-weight: 800;
+    rotate: -45deg;
+  }
+
+  .map-pin > span {
+    rotate: 45deg;
   }
 
   .map-pin-open {
@@ -239,6 +214,18 @@ body {
     width: 0.62rem;
     height: 0.62rem;
     border-radius: 999px;
+  }
+
+  .collapsible-panel {
+    @apply p-4;
+  }
+
+  .collapsible-trigger {
+    @apply flex min-w-0 flex-1 items-center gap-3 text-left outline-none;
+  }
+
+  .faq-card {
+    @apply flex min-h-24 items-start gap-3 rounded-md border border-slate-200 bg-white p-4 text-left transition hover:border-mint/50 hover:bg-mint/5 hover:shadow-panel;
   }
 }
 
@@ -362,7 +349,8 @@ body {
 
 .dark .clinic-slot-card,
 .dark .bottom-workflow-bar,
-.dark .workflow-tile {
+.dark .workflow-tile,
+.dark .faq-card {
   background-color: #0f172a;
   border-color: #263247;
 }
@@ -378,8 +366,6 @@ body {
 .dark .clinic-map {
   border-color: #263247;
   background:
-    linear-gradient(90deg, rgba(51, 65, 85, 0.55) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(51, 65, 85, 0.55) 1px, transparent 1px),
-    linear-gradient(135deg, #0f172a 0%, #10221f 48%, #111827 100%);
-  background-size: 34px 34px, 34px 34px, auto;
+    linear-gradient(180deg, rgba(2, 6, 23, 0.05), rgba(2, 6, 23, 0.35)),
+    url("/aerial-map.svg") center / cover no-repeat;
 }

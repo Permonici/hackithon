@@ -15,12 +15,14 @@ AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení fu
 - Strict mode a bezpečný fallback.
 - Tolerantní režimy retrievalu: přesné, vyvážené a širší hledání v chuncích.
 - Chat history, uživatelský kontext a čisté pacientské workflow bez cenového panelu.
-- Hlasový vstup přes mikrofon a volitelné přečtení odpovědi v mužském nebo ženském hlasu.
+- Hlasový vstup přes mikrofon a volitelné přečtení odpovědi s volbou jazyka hlasu.
 - Rozklikávací seznam konkrétních zdrojů přímo u odpovědi v chatu.
 - Pacientský formulář s urgencí, konkrétním problémem a lokálním uložením v prohlížeči.
 - Pacientský agent s textovým zadáním, doporučením nejdřívějších termínů, předrezervací a eskalací.
 - Malá mapa demo ordinací včetně dentální hygieny a informace, zda nabírají nové pacienty.
-- Spodní workflow lišta: nejčastější dotazy, předobjednání, kontakty a eskalace.
+- Letecká mapa demo ordinací včetně dentální hygieny a informace, zda nabírají nové pacienty.
+- Workflow lišta pod mapou: nejčastější dotazy, předobjednání, kontakty a historie.
+- Skládací pravý panel, aby demo zůstalo přehledné i na menším monitoru.
 - Light/dark mode a zvětšení písma pro lepší prezentaci i přístupnost.
 - JSONL log interakcí pro vyhodnocení kvality.
 - Offline fallback skripty bez Dockeru a bez API klíče.
