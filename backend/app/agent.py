@@ -13,6 +13,7 @@ from xdent_assistant.models import TopicResult
 from .cache import QueryCache
 from .clinics import assess_urgency, find_nearby_clinics, reserve_earliest_slot
 from .config import Settings
+from .memory import get_patient_memory_store
 from .pricing import resolve_chat_prices, resolve_embedding_price
 from .schemas import (
     AgentStep,
@@ -62,6 +63,22 @@ Do textu odpovědi nikdy nepiš řádek `Zdroj:`; zdroje se uživateli ukazují 
 Nevymýšlej postupy mimo kontext."""
 
 
+AGENT_PROFILES = {
+    "support": {
+        "label": "Technicka podpora",
+        "instruction": "Res technicke dotazy k XDENTu podle transkripci.",
+    },
+    "patient": {
+        "label": "Pacientsky koordinator",
+        "instruction": "Sbirej jen nutne udaje pacienta, vyhodnot urgenci a navrhni dalsi krok.",
+    },
+    "handoff": {
+        "label": "Eskalacni agent",
+        "instruction": "Priprav kratke predani pro podporu nebo recepci, kdyz chybi jistota nebo udaje.",
+    },
+}
+
+
 @tool
 def classify_issue_tool(message: str) -> str:
     """Rozpozná tematickou oblast dotazu zákazníka."""
@@ -97,25 +114,62 @@ class SupportAgent:
         self,
         message: str,
         *,
+        agent_mode: str = "support",
         strict_mode: bool,
         top_k: int,
         retrieval_tolerance: str = "balanced",
         session_id: str | None = None,
         user: UserInfo | None = None,
     ) -> ChatResponse:
+        agent_mode = self._normalize_agent_mode(agent_mode)
+        profile = AGENT_PROFILES[agent_mode]
+        memory_store = get_patient_memory_store(str(self.settings.logs_dir / "patient_memory.json"))
+        effective_user, memory_updates = memory_store.merge(
+            session_id=session_id,
+            incoming=user,
+            message=message,
+            agent_mode=agent_mode,
+        )
+
         # ── cache lookup ──────────────────────────────────────────────────────
         cache = get_agent_cache(self.settings)
         cache_key, normalized_query = cache.build_key(message, strict_mode, retrieval_tolerance, top_k)
         cache.record_query(normalized_query)
-        can_use_cache = not self._has_case_context(user)
+        can_use_cache = agent_mode == "support" and not self._has_case_context(effective_user) and not memory_updates
         cached = cache.get(cache_key) if can_use_cache else None
         if cached is not None:
-            return cached.model_copy(update={"session_id": session_id, "user": user})
+            return cached.model_copy(update={
+                "session_id": session_id,
+                "user": effective_user,
+                "agent_mode": agent_mode,
+                "agent_label": profile["label"],
+                "memory_updates": [],
+            })
 
         # ── normal pipeline ───────────────────────────────────────────────────
         steps: list[AgentStep] = []
+        steps.append(
+            AgentStep(
+                id="agent",
+                label="Vyber agenta",
+                status="done",
+                detail=f"Aktivni agent: {profile['label']}.",
+                payload={"agent_mode": agent_mode, "agent_label": profile["label"]},
+            )
+        )
+        if memory_updates:
+            steps.append(
+                AgentStep(
+                    id="memory",
+                    label="Pamet pacienta",
+                    status="done",
+                    detail="Ulozeno: " + ", ".join(memory_updates) + ".",
+                    payload={"updates": memory_updates},
+                )
+            )
 
         classified = classify_topic(message)
+        classify_step_index = len(steps)
         steps.append(
             AgentStep(
                 id="classify",
@@ -139,7 +193,7 @@ class SupportAgent:
             tolerance=retrieval_tolerance,
         )
         classified = self._refine_topic(classified, retrieved_sources)
-        steps[0] = AgentStep(
+        steps[classify_step_index] = AgentStep(
             id="classify",
             label="Rozpoznání tématu",
             status="done" if classified.topic else "warning",
@@ -192,11 +246,25 @@ class SupportAgent:
             )
         )
 
-        care_result = self._run_care_workflow(message, user) if self._wants_care_workflow(message, user) else None
+        wants_care = agent_mode in {"patient", "handoff"} or self._wants_care_workflow(message, effective_user)
+        care_result = self._run_care_workflow(message, effective_user) if wants_care else None
         if care_result:
             steps.extend(care_result.steps)
 
-        if not grounded:
+        if agent_mode == "handoff":
+            escalation_packet = self._build_escalation_packet(
+                message=message,
+                topic=classified.label,
+                reason="Uzivatel zvolil eskalacniho agenta nebo je potreba rychle predani.",
+                user=effective_user,
+                sources=sources,
+                care=care_result,
+            )
+            answer = self._compose_handoff_answer(effective_user, care_result)
+            used_llm = False
+            answer_status = "done"
+            answer_detail = "Eskalacni agent pripravil predani podpore."
+        elif not grounded:
             escalation_packet = create_escalation_packet_tool.invoke(
                 {
                     "message": message,
@@ -215,7 +283,7 @@ class SupportAgent:
         else:
             escalation_packet = None
             try:
-                answer, used_llm = self._draft_answer(message, classified.label, sources, user)
+                answer, used_llm = self._draft_answer(message, classified.label, sources, effective_user, profile["instruction"])
                 answer_status = "done"
                 answer_detail = "Odpověď je krátká, opřená o zdroje a připravená pro chat."
             except Exception as exc:
@@ -223,7 +291,7 @@ class SupportAgent:
                 answer_status = "warning"
                 answer_detail = f"LLM odpověď se nepodařila, použit bezpečný fallback ze zdrojů: {exc}"
 
-        if not grounded or (care_result and self._needs_escalation(care_result)):
+        if agent_mode != "handoff" and (not grounded or (care_result and self._needs_escalation(care_result))):
             reason = (
                 "Nizka shoda v transkripcich nebo chybejici overeny postup."
                 if not grounded
@@ -233,13 +301,13 @@ class SupportAgent:
                 message=message,
                 topic=classified.label,
                 reason=reason,
-                user=user,
+                user=effective_user,
                 sources=sources,
                 care=care_result,
             )
 
-        if care_result:
-            answer = self._compose_care_answer(care_result, sources if grounded else [])
+        if care_result and agent_mode != "handoff":
+            answer = self._compose_care_answer(care_result, effective_user, agent_mode)
 
         answer = self._strip_source_lines(answer)
 
@@ -259,17 +327,21 @@ class SupportAgent:
             topic_label=classified.label,
             confidence=classified.confidence,
             answer_confidence=self._answer_confidence(classified.confidence, sources, grounded),
+            agent_mode=agent_mode,
+            agent_label=profile["label"],
             sources=sources,
             steps=steps,
             escalation_packet=escalation_packet,
             used_llm=used_llm,
             session_id=session_id,
-            user=user,
+            user=effective_user,
             retrieval_tolerance=retrieval_tolerance,
             usage=self._estimate_usage(message, answer, sources, used_llm),
             triage=care_result.triage if care_result else None,
             clinics=care_result.clinics if care_result else [],
             appointment=care_result.appointment if care_result else None,
+            memory_updates=memory_updates,
+            next_actions=self._next_actions(agent_mode, effective_user, care_result, bool(escalation_packet), grounded),
         )
         self._log(message, response)
 
@@ -285,6 +357,7 @@ class SupportAgent:
         topic_label: str,
         sources: list[Source],
         user: UserInfo | None,
+        agent_instruction: str,
     ) -> tuple[str, bool]:
         if not self.settings.openai_api_key:
             return self._fallback_answer(topic_label, sources)
@@ -295,11 +368,12 @@ class SupportAgent:
                 ("system", SYSTEM_PROMPT),
                 (
                     "human",
+                    "Aktivni agent: {agent_instruction}\n"
                     "Kontext zákazníka: {user_context}\n"
                     "Téma: {topic}\n"
                     "Dotaz zákazníka: {message}\n\n"
                     "Zdroje:\n{sources}\n\n"
-                    "Odpověz maximálně 4 krátkými větami. Neopakuj celý úryvek, vytáhni jen smysluplný postup.",
+                    "Odpověz maximálně 3 krátkými větami. Neopakuj celý úryvek, vytáhni jen smysluplný postup.",
                 ),
             ]
         )
@@ -307,6 +381,7 @@ class SupportAgent:
             {
                 "topic": topic_label,
                 "message": message,
+                "agent_instruction": agent_instruction,
                 "user_context": self._user_context(user),
                 "sources": self._source_context(sources),
             }
@@ -411,7 +486,7 @@ class SupportAgent:
             lines.append("Pozn.: ordinace a terminy jsou demo workflow; v ostrem provozu se napoji kalendar XDENT.")
         return answer.strip() + "\n\n" + "\n".join(lines)
 
-    def _compose_care_answer(self, care: CareWorkflowResult, sources: list[Source]) -> str:
+    def _compose_care_answer(self, care: CareWorkflowResult, user: UserInfo | None, agent_mode: str) -> str:
         lines: list[str] = []
         if care.triage:
             if care.triage.urgency == "critical":
@@ -430,13 +505,16 @@ class SupportAgent:
 
         if care.clinics:
             clinic_parts = []
-            for clinic in care.clinics[:3]:
+            for clinic in care.clinics[:2]:
                 accepting = "nabira" if clinic.accepting_new_patients else "po domluve"
-                distance = f", {clinic.distance_km} km" if clinic.distance_km is not None else ""
-                clinic_parts.append(f"{clinic.name} ({clinic.city}{distance}, {accepting}, {clinic.earliest_slot})")
-            lines.append("Dalsi dostupne moznosti: " + "; ".join(clinic_parts))
+                clinic_parts.append(f"{clinic.name}: {clinic.earliest_slot}, {accepting}")
+            lines.append("Alternativy: " + "; ".join(clinic_parts))
 
-        lines.append("Pozn.: terminy jsou demo predrezervace; v ostrem provozu se napoji primo na kalendar XDENT.")
+        missing = self._missing_patient_fields(user, require_location=agent_mode == "patient")
+        if missing:
+            lines.append("Pro rychle vyrizeni doplnte: " + ", ".join(missing) + ".")
+
+        lines.append("Demo predrezervace; v ostrem provozu se napoji primo na kalendar XDENT.")
         return "\n".join(lines)
 
     def _needs_escalation(self, care: CareWorkflowResult) -> bool:
@@ -444,6 +522,50 @@ class SupportAgent:
             (care.triage and care.triage.urgency == "critical")
             or (care.appointment and care.appointment.status in {"needs_contact", "unavailable"})
         )
+
+    def _compose_handoff_answer(self, user: UserInfo | None, care: CareWorkflowResult | None) -> str:
+        missing = self._missing_patient_fields(user, require_location=True)
+        if care and care.triage and care.triage.urgency == "critical":
+            return "Pripravena eskalace. Kvuli kriticke urgenci volejte ordinaci nebo pohotovost ihned."
+        if missing:
+            return "Pripravena eskalace. Pro rychle predani jeste doplnte: " + ", ".join(missing) + "."
+        return "Pripravena eskalace pro podporu. Predani obsahuje dotaz, kontakt, urgenci a nalezene podklady."
+
+    def _next_actions(
+        self,
+        agent_mode: str,
+        user: UserInfo | None,
+        care: CareWorkflowResult | None,
+        has_escalation: bool,
+        grounded: bool,
+    ) -> list[str]:
+        actions: list[str] = []
+        if agent_mode == "patient":
+            for missing in self._missing_patient_fields(user, require_location=True):
+                actions.append(f"Doplnit {missing}")
+            if care and care.appointment and care.appointment.status == "needs_contact":
+                actions.append("Doplnit kontakt pro predrezervaci")
+            if care and care.triage and care.triage.urgency in {"high", "critical"}:
+                actions.append("Zavolat ordinaci")
+            actions.append("Najit nejdrivejsi termin")
+        if has_escalation:
+            actions.append("Kopirovat eskalaci")
+        if not grounded and agent_mode == "support":
+            actions.extend(["Prilozit screenshot", "Predat 2. urovni"])
+        return list(dict.fromkeys(actions))[:4]
+
+    def _missing_patient_fields(self, user: UserInfo | None, *, require_location: bool) -> list[str]:
+        missing: list[str] = []
+        if not user or not self._best_patient_contact(user):
+            missing.append("telefon/e-mail")
+        if require_location and not self._care_location(user):
+            missing.append("mesto")
+        if not user or not user.problem_summary:
+            missing.append("popis problemu")
+        return missing
+
+    def _normalize_agent_mode(self, agent_mode: str) -> str:
+        return agent_mode if agent_mode in AGENT_PROFILES else "support"
 
     def _build_escalation_packet(
         self,
@@ -749,6 +871,8 @@ class SupportAgent:
                 "timestamp": utc_now(),
                 "question": message,
                 "answer": response.answer,
+                "agent_mode": response.agent_mode,
+                "agent_label": response.agent_label,
                 "topic": response.topic,
                 "topic_label": response.topic_label,
                 "confidence": response.confidence,
@@ -757,6 +881,8 @@ class SupportAgent:
                 "used_llm": response.used_llm,
                 "session_id": response.session_id,
                 "review_ready": True,
+                "memory_updates": response.memory_updates,
+                "next_actions": response.next_actions,
                 "retrieval_tolerance": response.retrieval_tolerance,
                 "user": response.user.model_dump() if response.user else None,
                 "usage": response.usage.model_dump() if response.usage else None,

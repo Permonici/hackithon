@@ -69,6 +69,10 @@ export async function fetchCacheStats(): Promise<CacheStats> {
   return response.json();
 }
 
+export async function forgetMemory(sessionId: string): Promise<void> {
+  await fetch(`${API_URL}/memory/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+}
+
 export async function ingestData(): Promise<void> {
   const response = await fetch(`${API_URL}/ingest`, { method: "POST" });
   if (!response.ok) {

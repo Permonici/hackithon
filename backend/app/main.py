@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from .agent import SupportAgent, get_agent_cache
 from .clinics import list_clinics
 from .config import get_settings
+from .memory import get_patient_memory_store
 from .schemas import (
     CacheStatsResponse,
     ChatRequest,
@@ -74,6 +75,7 @@ def chat(request: ChatRequest) -> ChatResponse:
     _ensure_ready()
     return SupportAgent(settings).answer(
         request.message,
+        agent_mode=request.agent_mode,
         strict_mode=request.strict_mode,
         top_k=request.top_k,
         retrieval_tolerance=request.retrieval_tolerance,
@@ -90,6 +92,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         yield _sse("step", {"id": "received", "label": "Přijat dotaz", "status": "done", "detail": request.message})
         await asyncio.sleep(0.15)
         for running_step in [
+            {"id": "agent", "label": "Vyber agenta", "status": "running", "detail": f"Aktivni rezim: {request.agent_mode}."},
             {"id": "classify", "label": "Rozpoznání tématu", "status": "running", "detail": "Agent třídí dotaz podle podpůrných oblastí."},
             {"id": "retrieve", "label": "Vyhledání v transkripcích", "status": "running", "detail": "Qdrant hledá nejbližší případy a zdroje."},
             {"id": "validate", "label": "Kontrola jistoty", "status": "running", "detail": "Ověřuji, jestli je odpověď dostatečně podložená."},
@@ -101,6 +104,7 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
             response = await asyncio.to_thread(
                 SupportAgent(settings).answer,
                 request.message,
+                agent_mode=request.agent_mode,
                 strict_mode=request.strict_mode,
                 top_k=request.top_k,
                 retrieval_tolerance=request.retrieval_tolerance,
@@ -170,6 +174,12 @@ def evaluate(request: EvalRequest) -> EvalResponse:
 @app.get(f"{settings.api_prefix}/cache/stats", response_model=CacheStatsResponse)
 def cache_stats() -> CacheStatsResponse:
     return CacheStatsResponse(**get_agent_cache(settings).stats())
+
+
+@app.delete(f"{settings.api_prefix}/memory/{{session_id}}")
+def forget_memory(session_id: str) -> dict[str, bool]:
+    store = get_patient_memory_store(str(settings.logs_dir / "patient_memory.json"))
+    return {"forgotten": store.forget(session_id)}
 
 
 def _ensure_ready() -> None:

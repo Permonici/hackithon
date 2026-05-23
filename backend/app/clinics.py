@@ -173,6 +173,8 @@ CRITICAL_KEYWORDS = (
 )
 HIGH_KEYWORDS = (
     "akut",
+    "boli",
+    "bolĂ­",
     "silna bolest",
     "silná bolest",
     "bolest",

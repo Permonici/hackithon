@@ -1,4 +1,5 @@
 export type RetrievalTolerance = "strict" | "balanced" | "broad";
+export type AgentMode = "support" | "patient" | "handoff";
 
 export type UserInfo = {
   name?: string | null;
@@ -83,6 +84,8 @@ export type AppointmentProposal = {
 
 export type ChatResponse = {
   answer: string;
+  agent_mode: AgentMode;
+  agent_label: string;
   topic: string;
   topic_label: string;
   confidence: number;
@@ -98,6 +101,8 @@ export type ChatResponse = {
   triage?: TriageResult | null;
   clinics: ClinicOption[];
   appointment?: AppointmentProposal | null;
+  memory_updates: string[];
+  next_actions: string[];
 };
 
 export type ChatMessage = {
@@ -118,6 +123,7 @@ export type StatsResponse = {
 
 export type ChatRequestPayload = {
   message: string;
+  agent_mode: AgentMode;
   strict_mode: boolean;
   top_k: number;
   retrieval_tolerance: RetrievalTolerance;

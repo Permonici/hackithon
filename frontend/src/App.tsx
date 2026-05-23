@@ -1,8 +1,11 @@
 import {
   AlertTriangle,
+  Bot,
   CheckCircle2,
   Copy,
   Database,
+  HeartPulse,
+  LifeBuoy,
   Loader2,
   MessageSquare,
   Mic,
@@ -16,19 +19,38 @@ import {
   Zap
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCacheStats, fetchStats, ingestData, sendChatStream } from "./api";
-import type { AgentStep, CacheStats, ChatMessage, ChatResponse, RetrievalTolerance, Source, StatsResponse } from "./types";
+import { fetchCacheStats, fetchStats, forgetMemory, ingestData, sendChatStream } from "./api";
+import type { AgentMode, AgentStep, CacheStats, ChatMessage, ChatResponse, RetrievalTolerance, Source, StatsResponse, UserInfo } from "./types";
 
 const STORAGE_MESSAGES = "xdent.chat.messages";
 const STORAGE_SESSION = "xdent.chat.session";
 const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
+const STORAGE_AGENT_MODE = "xdent.chat.agentMode";
+const STORAGE_PATIENT_MEMORY = "xdent.chat.patientMemory";
 
-const demoQuestions = [
-  "Nejde mi odeslat ePoukaz, system pise chybu s uhradou. Co mam zkontrolovat?",
-  "Po instalaci certifikatu se uzivatel nemuze prihlasit do XDENTu.",
-  "Dokument se netiskne spravne a potrebuji upravit sablonu tisku.",
-  "Kde v kalendari zmenim termin objednaneho pacienta?"
+const agentOptions: Array<{ id: AgentMode; label: string; hint: string; icon: ReactNode }> = [
+  { id: "support", label: "Podpora", hint: "XDENT software", icon: <Bot size={15} /> },
+  { id: "patient", label: "Pacient", hint: "urgence a termin", icon: <HeartPulse size={15} /> },
+  { id: "handoff", label: "Eskalace", hint: "predani podpore", icon: <LifeBuoy size={15} /> }
 ];
+
+const demoQuestions: Record<AgentMode, string[]> = {
+  support: [
+    "Nejde mi odeslat ePoukaz, system pise chybu s uhradou. Co mam zkontrolovat?",
+    "Po instalaci certifikatu se uzivatel nemuze prihlasit do XDENTu.",
+    "Dokument se netiskne spravne a potrebuji upravit sablonu tisku."
+  ],
+  patient: [
+    "Jmenuji se Jana Novakova, jsem z Prahy, boli me zub a potrebuji nejdrivejsi termin. Telefon 777 123 456.",
+    "Mam otok a silnou bolest, jsem v Brne. Co mam delat?",
+    "Chci objednat dentalni hygienu v Praze, muj e-mail je pacient@example.cz."
+  ],
+  handoff: [
+    "Priprav eskalaci pro podporu, eRecept nejde odeslat a mam screenshot chyby.",
+    "Pacient je z Ostravy, ma akutni bolest a chybi nam potvrzeny kontakt.",
+    "Predat 2. urovni: po instalaci certifikatu nejde prihlaseni."
+  ]
+};
 
 const emptySteps: AgentStep[] = [
   { id: "classify", label: "Tema", status: "queued", detail: "Cekam na dotaz." },
@@ -39,8 +61,10 @@ const emptySteps: AgentStep[] = [
 
 function App() {
   const [open, setOpen] = useState(false);
-  const [message, setMessage] = useState(demoQuestions[0]);
+  const [agentMode, setAgentMode] = useState<AgentMode>(() => loadJson<AgentMode>(STORAGE_AGENT_MODE, "support"));
+  const [message, setMessage] = useState(demoQuestions.support[0]);
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadJson<ChatMessage[]>(STORAGE_MESSAGES, []));
+  const [patientMemory, setPatientMemory] = useState<UserInfo | null>(() => loadJson<UserInfo | null>(STORAGE_PATIENT_MEMORY, null));
   const [sessionId] = useState(() => loadOrCreateSessionId());
   const [loading, setLoading] = useState(false);
   const [indexing, setIndexing] = useState(false);
@@ -64,6 +88,9 @@ function App() {
   const visibleSteps = loading ? liveSteps : savedResponse?.steps ?? liveSteps;
   const selectedVoice = selectCzechVoice(ttsVoices);
   const topFrequent = cacheStats?.top_frequent?.[0]?.query;
+  const samples = demoQuestions[agentMode];
+  const latestActions = savedResponse?.next_actions ?? [];
+  const latestEscalation = savedResponse?.escalation_packet ?? null;
 
   useEffect(() => {
     void refreshStats();
@@ -72,6 +99,8 @@ function App() {
 
   useEffect(() => { saveJson(STORAGE_MESSAGES, messages); }, [messages]);
   useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
+  useEffect(() => { saveJson(STORAGE_AGENT_MODE, agentMode); }, [agentMode]);
+  useEffect(() => { saveJson(STORAGE_PATIENT_MEMORY, patientMemory); }, [patientMemory]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -146,6 +175,13 @@ function App() {
     setIsSpeaking(false);
   }
 
+  function chooseAgent(next: AgentMode) {
+    setAgentMode(next);
+    if (!message.trim() || Object.values(demoQuestions).flat().includes(message)) {
+      setMessage(demoQuestions[next][0]);
+    }
+  }
+
   async function handleSend(event?: FormEvent) {
     event?.preventDefault();
     const text = message.trim();
@@ -174,11 +210,12 @@ function App() {
       const result = await sendChatStream(
         {
           message: text,
+          agent_mode: agentMode,
           strict_mode: false,
           top_k: 6,
           retrieval_tolerance: "balanced" as RetrievalTolerance,
           session_id: sessionId,
-          user: null
+          user: patientMemory
         },
         (step) => setLiveSteps((current) => mergeStep(current, step)),
         controller.signal
@@ -192,6 +229,7 @@ function App() {
         response: result
       };
       setMessages((current) => [...current, assistantMessage]);
+      if (result.user) setPatientMemory(result.user);
       if (voiceOutputEnabled) speak(result.answer);
       void refreshCacheStats();
     } catch (err) {
@@ -220,6 +258,19 @@ function App() {
   function clearHistory() {
     setMessages([]);
     setLiveSteps(emptySteps);
+  }
+
+  async function clearPatientMemory() {
+    setPatientMemory(null);
+    await forgetMemory(sessionId).catch(() => undefined);
+  }
+
+  async function handleNextAction(action: string) {
+    if (action.toLowerCase().includes("kopirovat") && latestEscalation) {
+      await navigator.clipboard?.writeText(latestEscalation);
+      return;
+    }
+    setMessage(promptForAction(action, patientMemory));
   }
 
   async function copyHistory() {
@@ -268,6 +319,9 @@ function App() {
             )}
           </div>
 
+          <AgentSwitcher selected={agentMode} onSelect={chooseAgent} />
+          <PatientMemoryStrip memory={patientMemory} updates={savedResponse?.memory_updates ?? []} onForget={clearPatientMemory} />
+
           {!isIndexed && (
             <div className="mx-4 mt-3 rounded-md border border-amber/30 bg-amber/10 p-3 text-sm text-amber">
               Nejdrive vytvorte index transkripci.
@@ -292,8 +346,18 @@ function App() {
             </div>
           )}
 
+          {latestActions.length > 0 && (
+            <div className="xdent-chat-actions">
+              {latestActions.map((action) => (
+                <button key={action} className="quick-action" type="button" onClick={() => { void handleNextAction(action); }}>
+                  {action}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="xdent-chat-samples">
-            {demoQuestions.slice(0, 3).map((question) => (
+            {samples.map((question) => (
               <button key={question} className="sample-chip" onClick={() => setMessage(question)}>
                 {question}
               </button>
@@ -311,7 +375,7 @@ function App() {
                   void handleSend();
                 }
               }}
-              placeholder="Napiste dotaz k XDENTu..."
+              placeholder={placeholderForAgent(agentMode)}
               maxLength={4000}
             />
             <div className="flex items-center justify-between gap-2">
@@ -373,12 +437,51 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
   );
 }
 
+function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: (mode: AgentMode) => void }) {
+  return (
+    <div className="agent-switch" aria-label="Vyber agenta">
+      {agentOptions.map((agent) => (
+        <button
+          key={agent.id}
+          className={`agent-option ${selected === agent.id ? "agent-option-active" : ""}`}
+          type="button"
+          onClick={() => onSelect(agent.id)}
+        >
+          <span className="inline-flex items-center gap-1.5">{agent.icon}{agent.label}</span>
+          <small>{agent.hint}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function PatientMemoryStrip({ memory, updates, onForget }: { memory: UserInfo | null; updates: string[]; onForget: () => void }) {
+  const chips = memoryChips(memory);
+  if (chips.length === 0 && updates.length === 0) return null;
+
+  return (
+    <details className="memory-strip">
+      <summary>
+        <span>Pamet pacienta</span>
+        <span className="text-slate-400">{updates.length ? `ulozeno: ${updates.join(", ")}` : `${chips.length} udaje`}</span>
+      </summary>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {chips.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)}
+        <button className="memory-forget" type="button" onClick={onForget}>Zapomenout udaje</button>
+      </div>
+    </details>
+  );
+}
+
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
   const visibleContent = isUser ? message.content : stripSourceLines(message.content);
   const answerConfidence = answerConfidencePercent(message.response);
   const sourceStrength = sourceStrengthPercent(message.response?.sources ?? []);
+  const assistantTitle = message.response
+    ? `${message.response.agent_label ?? "XDENT asistent"} · ${message.response.topic_label ?? "odpoved"}`
+    : "XDENT asistent";
 
   async function copyContent() {
     await navigator.clipboard?.writeText(visibleContent);
@@ -390,7 +493,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
     <article className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"} group relative`}>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-          <span className="font-semibold">{isUser ? "Vy" : message.response?.topic_label ?? "XDENT asistent"}</span>
+          <span className="font-semibold">{isUser ? "Vy" : assistantTitle}</span>
           <div className="flex items-center gap-2">
             <span className={isUser ? "text-white/70" : "text-slate-400"}>{formatTime(message.created_at)}</span>
             <button className={`opacity-0 transition-opacity group-hover:opacity-100 ${isUser ? "text-white/70 hover:text-white" : "text-slate-400 hover:text-slate-600"}`} onClick={copyContent} title="Kopirovat zpravu">
@@ -420,10 +523,32 @@ function ChatBubble({ message }: { message: ChatMessage }) {
               </div>
             </div>
             <SourceDisclosure sources={message.response.sources} />
+            {message.response.escalation_packet && <EscalationDisclosure packet={message.response.escalation_packet} />}
           </div>
         )}
       </div>
     </article>
+  );
+}
+
+function EscalationDisclosure({ packet }: { packet: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyPacket() {
+    await navigator.clipboard?.writeText(packet);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  }
+
+  return (
+    <details className="rounded-md border border-amber/30 bg-amber/10 px-2 py-1 text-amber">
+      <summary className="cursor-pointer list-none select-none">Eskalace pripravena</summary>
+      <pre className="thin-scroll mt-2 max-h-36 overflow-auto whitespace-pre-wrap rounded bg-white/80 p-2 text-[11px] leading-5 text-slate-700">{packet}</pre>
+      <button className="mt-2 inline-flex items-center gap-1 text-xs font-semibold" type="button" onClick={copyPacket}>
+        {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+        {copied ? "Zkopirovano" : "Kopirovat eskalaci"}
+      </button>
+    </details>
   );
 }
 
@@ -508,6 +633,48 @@ function stripSourceLines(text: string): string {
     .filter((line) => !line.trim().toLowerCase().startsWith("zdroj:"))
     .join("\n")
     .trim();
+}
+
+function memoryChips(memory: UserInfo | null): string[] {
+  if (!memory) return [];
+  const chips: string[] = [];
+  if (memory.patient_name) chips.push(`Pacient: ${memory.patient_name}`);
+  if (memory.patient_phone) chips.push(`Tel.: ${memory.patient_phone}`);
+  if (memory.patient_email) chips.push(`E-mail: ${memory.patient_email}`);
+  if (memory.patient_city) chips.push(`Mesto: ${memory.patient_city}`);
+  if (memory.urgency) chips.push(`Urgence: ${urgencyLabel(memory.urgency)}`);
+  if (memory.problem_summary) chips.push("Problem ulozen");
+  return chips;
+}
+
+function urgencyLabel(value: UserInfo["urgency"]): string {
+  return {
+    low: "nizka",
+    normal: "bezna",
+    high: "vysoka",
+    critical: "kriticka"
+  }[value ?? "normal"];
+}
+
+function placeholderForAgent(agentMode: AgentMode): string {
+  if (agentMode === "patient") return "Popiste problem, mesto a kontakt pacienta...";
+  if (agentMode === "handoff") return "Popiste, co se ma predat podpore...";
+  return "Napiste dotaz k XDENTu...";
+}
+
+function promptForAction(action: string, memory: UserInfo | null): string {
+  const lowered = action.toLowerCase();
+  if (lowered.includes("telefon") || lowered.includes("kontakt")) return "Telefon/e-mail pacienta je: ";
+  if (lowered.includes("mesto")) return "Pacient je z mesta: ";
+  if (lowered.includes("popis")) return "Problem pacienta je: ";
+  if (lowered.includes("nejdrivejsi")) {
+    const city = memory?.patient_city ? ` v ${memory.patient_city}` : "";
+    return `Najdi nejdrivejsi termin${city}.`;
+  }
+  if (lowered.includes("screenshot")) return "Mam screenshot chyby. Chci pripravit eskalaci pro podporu.";
+  if (lowered.includes("2. urovni")) return "Predat 2. urovni podpory: ";
+  if (lowered.includes("zavolat")) return "Chci kontakt na nejvhodnejsi ordinaci pro akutni pripad.";
+  return action;
 }
 
 function loadJson<T>(key: string, fallback: T): T {

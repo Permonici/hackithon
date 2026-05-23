@@ -5,6 +5,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+AgentMode = Literal["support", "patient", "handoff"]
+
+
 class UserInfo(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     clinic: str | None = Field(default=None, max_length=160)
@@ -25,6 +28,7 @@ class UserInfo(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
+    agent_mode: AgentMode = "support"
     strict_mode: bool = False
     top_k: int = Field(default=5, ge=1, le=12)
     retrieval_tolerance: Literal["strict", "balanced", "broad"] = "balanced"
@@ -97,6 +101,8 @@ class AppointmentProposal(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    agent_mode: AgentMode = "support"
+    agent_label: str = "Technicka podpora"
     topic: str
     topic_label: str
     confidence: float
@@ -112,6 +118,8 @@ class ChatResponse(BaseModel):
     triage: TriageResult | None = None
     clinics: list[ClinicOption] = Field(default_factory=list)
     appointment: AppointmentProposal | None = None
+    memory_updates: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class PriceInfoResponse(BaseModel):
