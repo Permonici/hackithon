@@ -66,27 +66,27 @@ Nevymýšlej postupy mimo kontext."""
 
 AGENT_PROFILES = {
     "auto": {
-        "label": "AI orchestrator",
-        "instruction": "Vyber nejvhodnejsiho specialistu a drz odpoved velmi kratkou.",
+        "label": "Chytry vyber pomoci",
+        "instruction": "Vyber nejvhodnejsiho pomocnika podle dotazu a drz odpoved velmi kratkou.",
     },
     "support": {
-        "label": "Technicka podpora",
+        "label": "Problem s programem XDENT",
         "instruction": "Res technicke dotazy k XDENTu podle transkripci.",
     },
     "patient": {
-        "label": "Pacientsky koordinator",
-        "instruction": "Sbirej jen nutne udaje pacienta, vyhodnot urgenci a navrhni dalsi krok.",
+        "label": "Pruvodce pacienta",
+        "instruction": "Sbirej jen nutne udaje pacienta, vyhodnot urgenci a navrhni dalsi krok lidsky a strucne.",
     },
     "triage": {
-        "label": "Triazni agent",
-        "instruction": "Vyhodnot urgenci pacienta a rekni nejbezpecnejsi dalsi krok.",
+        "label": "Bolest nebo akutni stav",
+        "instruction": "Vyhodnot nalehavost pacienta a rekni nejbezpecnejsi dalsi krok.",
     },
     "scheduler": {
-        "label": "Terminovy agent",
+        "label": "Najit nejdrivejsi termin",
         "instruction": "Hledej nejdrivejsi vhodny termin a hlidej, zda jsou ulozene kontaktni udaje.",
     },
     "handoff": {
-        "label": "Eskalacni agent",
+        "label": "Predat cloveku",
         "instruction": "Priprav kratke predani pro podporu nebo recepci, kdyz chybi jistota nebo udaje.",
     },
 }
@@ -276,7 +276,7 @@ class SupportAgent:
             escalation_packet = self._build_escalation_packet(
                 message=message,
                 topic=classified.label,
-                reason="Uzivatel zvolil eskalacniho agenta nebo je potreba rychle predani.",
+                reason="Uzivatel zvolil predani cloveku nebo je potreba rychle predani.",
                 user=effective_user,
                 sources=sources,
                 care=care_result,
@@ -284,7 +284,7 @@ class SupportAgent:
             answer = self._compose_handoff_answer(effective_user, care_result)
             used_llm = False
             answer_status = "done"
-            answer_detail = "Eskalacni agent pripravil predani podpore."
+            answer_detail = "Predani cloveku je pripravene."
         elif care_result and agent_mode in {"patient", "triage", "scheduler"}:
             escalation_packet = None
             answer = self._compose_care_answer(care_result, effective_user, agent_mode)
@@ -453,14 +453,14 @@ class SupportAgent:
         steps = [
             AgentStep(
                 id="triage",
-                label="Triazni agent",
+                label="Kontrola nalehavosti",
                 status="warning" if triage.needs_immediate_care else "done",
                 detail=f"Vyhodnocena urgence: {triage.label}.",
                 payload=triage.model_dump(),
             ),
             AgentStep(
                 id="clinics",
-                label="Agent ordinaci",
+                label="Vyber ordinace",
                 status="done" if clinics else "warning",
                 detail=(
                     f"Nalezeny {len(clinics)} demo ordinace pobliz: {city or 'bez zadaneho mesta'}."
@@ -474,7 +474,7 @@ class SupportAgent:
             steps.append(
                 AgentStep(
                     id="booking",
-                    label="Rezervacni agent",
+                    label="Predbezna rezervace",
                     status="done" if appointment.status == "pre_reserved" else "warning",
                     detail=appointment.message,
                     payload=appointment.model_dump(),
@@ -491,7 +491,7 @@ class SupportAgent:
     def _append_care_context(self, answer: str, care: CareWorkflowResult) -> str:
         lines: list[str] = []
         if care.triage:
-            lines.append(f"Triaz: {care.triage.label} - {care.triage.recommendation}")
+            lines.append(f"Nalehavost: {care.triage.label} - {care.triage.recommendation}")
 
         if care.clinics:
             clinic_parts = []
@@ -519,31 +519,36 @@ class SupportAgent:
         lines: list[str] = []
         if care.triage:
             if care.triage.urgency == "critical":
-                lines.append("Urgence je kriticka: volejte ordinaci nebo pohotovost ihned.")
+                lines.append("Tohle vypada akutne: volejte ordinaci nebo zubni pohotovost hned.")
+            elif care.triage.urgency == "high":
+                lines.append("Priorita je vysoka. Doporucuji nejblizsi akutni termin a potvrdit kontakt.")
             else:
-                lines.append(f"Urgence: {care.triage.label}. {care.triage.recommendation}")
+                lines.append(f"Priorita: {care.triage.label}. {care.triage.recommendation}")
 
         if care.appointment:
             if care.appointment.status == "pre_reserved":
                 lines.append(
-                    f"Nejdrivejsi termin: {care.appointment.clinic_name}, "
-                    f"{care.appointment.slot_start}. Predrezervace {care.appointment.reservation_id}; recepce ji musi potvrdit."
+                    f"Nasel jsem nejdrivejsi termin: {care.appointment.clinic_name}, "
+                    f"{care.appointment.slot_start}. Kod predrezervace: {care.appointment.reservation_id}."
                 )
+            elif care.appointment.status == "needs_contact":
+                lines.append("Termin umim predbezne pripravit, ale chybi telefon nebo e-mail pro potvrzeni.")
             else:
                 lines.append(care.appointment.message)
 
         if care.clinics:
             clinic_parts = []
             for clinic in care.clinics[:2]:
-                accepting = "nabira" if clinic.accepting_new_patients else "po domluve"
-                clinic_parts.append(f"{clinic.name}: {clinic.earliest_slot}, {accepting}")
-            lines.append("Alternativy: " + "; ".join(clinic_parts))
+                accepting = "bere nove pacienty" if clinic.accepting_new_patients else "nove pacienty jen po domluve"
+                clinic_parts.append(f"{clinic.name}: {clinic.earliest_slot}, {accepting}, tel. {clinic.phone}")
+            lines.append("Moznosti v okoli: " + "; ".join(clinic_parts))
 
         missing = self._missing_patient_fields(user, require_location=agent_mode in {"patient", "scheduler"})
         if missing:
-            lines.append("Pro rychle vyrizeni doplnte: " + ", ".join(missing) + ".")
+            lines.append("Aby to slo dokoncit, doplnte: " + ", ".join(missing) + ".")
 
-        lines.append("Demo predrezervace; v ostrem provozu se napoji primo na kalendar XDENT.")
+        if care.appointment and care.appointment.status == "pre_reserved":
+            lines.append("Recepce musi termin jeste potvrdit; v ostrem provozu se napoji primo na kalendar XDENT.")
         return "\n".join(lines)
 
     def _needs_escalation(self, care: CareWorkflowResult) -> bool:
@@ -570,10 +575,16 @@ class SupportAgent:
     ) -> list[str]:
         actions: list[str] = []
         if agent_mode in {"patient", "triage", "scheduler"}:
-            for missing in self._missing_patient_fields(user, require_location=True):
-                actions.append(f"Doplnit {missing}")
-            if care and care.appointment and care.appointment.status == "needs_contact":
-                actions.append("Doplnit kontakt pro predrezervaci")
+            missing_fields = self._missing_patient_fields(user, require_location=True)
+            for missing in missing_fields:
+                actions.append(self._action_for_missing(missing))
+            if (
+                care
+                and care.appointment
+                and care.appointment.status == "needs_contact"
+                and "telefon/e-mail" not in missing_fields
+            ):
+                actions.append("Doplnit kontakt pro potvrzeni")
             if care and care.triage and care.triage.urgency in {"high", "critical"}:
                 actions.append("Zavolat ordinaci")
             if agent_mode != "triage":
@@ -585,6 +596,14 @@ class SupportAgent:
         if not grounded and agent_mode == "support":
             actions.extend(["Prilozit screenshot", "Predat 2. urovni"])
         return list(dict.fromkeys(actions))[:4]
+
+    def _action_for_missing(self, missing: str) -> str:
+        labels = {
+            "telefon/e-mail": "Doplnit telefon nebo e-mail",
+            "mesto": "Doplnit mesto pacienta",
+            "popis problemu": "Doplnit, co pacienta trapi",
+        }
+        return labels.get(missing, f"Doplnit {missing}")
 
     def _missing_patient_fields(self, user: UserInfo | None, *, require_location: bool) -> list[str]:
         missing: list[str] = []
@@ -629,6 +648,10 @@ class SupportAgent:
             "silna bolest",
             "akut",
             "neustavajici bolest",
+            "nesnesitelna bolest",
+            "hnis",
+            "absces",
+            "nemuzu spat",
         )
         booking_terms = (
             "termin",
@@ -640,18 +663,23 @@ class SupportAgent:
             "hygien",
             "ordinac",
             "pobliz",
+            "zubar",
+            "zubni",
+            "kontrola",
+            "cisteni",
         )
-        escalation_terms = ("eskal", "predat", "2. urov", "druha urov")
+        patient_terms = ("pacient", "kontakt", "telefon", "email", "e-mail", "bydlim", "jsem z")
+        escalation_terms = ("eskal", "predat", "2. urov", "druha urov", "operator", "recepce", "clovek")
 
         if any(term in text for term in escalation_terms):
-            return "handoff", "AI orchestrator rozpoznal potrebu predani podpore."
+            return "handoff", "AI poznala, ze je lepsi pripravit predani cloveku."
         if any(term in text for term in red_flags):
-            return "triage", "AI orchestrator rozpoznal priznaky s vyssi urgenci."
+            return "triage", "AI poznala priznaky, ktere mohou byt akutni."
         if any(term in text for term in booking_terms):
-            return "scheduler", "AI orchestrator rozpoznal pozadavek na termin nebo ordinaci."
-        if has_patient_context:
-            return "patient", "AI orchestrator nasel ulozene pacientske udaje."
-        return "support", "AI orchestrator zvolil technickou podporu XDENT."
+            return "scheduler", "AI poznala, ze pacient pravdepodobne potrebuje termin nebo ordinaci."
+        if has_patient_context or any(term in text for term in patient_terms):
+            return "patient", "AI pracuje s pacientskymi udaji a doplni, co chybi."
+        return "support", "AI poznala dotaz k programu XDENT."
 
     def _build_escalation_packet(
         self,

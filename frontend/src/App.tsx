@@ -31,19 +31,19 @@ const STORAGE_AGENT_MODE = "xdent.chat.agentMode";
 const STORAGE_PATIENT_MEMORY = "xdent.chat.patientMemory";
 
 const agentOptions: Array<{ id: AgentMode; label: string; hint: string; icon: ReactNode }> = [
-  { id: "auto", label: "AI vybere", hint: "orchestrator", icon: <Zap size={15} /> },
-  { id: "support", label: "Podpora", hint: "XDENT software", icon: <Bot size={15} /> },
-  { id: "patient", label: "Pacient", hint: "urgence a termin", icon: <HeartPulse size={15} /> },
-  { id: "triage", label: "Triaz", hint: "priorita pripadu", icon: <Activity size={15} /> },
-  { id: "scheduler", label: "Terminy", hint: "nejdrivejsi cas", icon: <Calendar size={15} /> },
-  { id: "handoff", label: "Eskalace", hint: "predani podpore", icon: <LifeBuoy size={15} /> }
+  { id: "auto", label: "Nechat AI vybrat", hint: "nejlepsi pomocnik podle dotazu", icon: <Zap size={15} /> },
+  { id: "support", label: "Problem s XDENTem", hint: "program, prihlaseni, tisk, eRecept", icon: <Bot size={15} /> },
+  { id: "patient", label: "Pruvodce pacienta", hint: "ulozi kontakt, mesto a problem", icon: <HeartPulse size={15} /> },
+  { id: "triage", label: "Bolest nebo akutni stav", hint: "odhadi nalehavost dalsiho kroku", icon: <Activity size={15} /> },
+  { id: "scheduler", label: "Najit nejdrivejsi termin", hint: "vybere ordinaci a cas", icon: <Calendar size={15} /> },
+  { id: "handoff", label: "Predat cloveku", hint: "pripravi shrnuti pro recepci/podporu", icon: <LifeBuoy size={15} /> }
 ];
 
 const demoQuestions: Record<AgentMode, string[]> = {
   auto: [
-    "Nejde mi prihlaseni do XDENTu a nevim, jestli je problem v certifikatu.",
+    "Boli me zub a potrebuji poradit, jestli je to akutni. Jsem z Prahy.",
     "Mam otok, horecku a silnou bolest. Jsem v Brne, telefon 777 123 456.",
-    "Najdi nejdrivejsi termin v Praze pro bolest zubu."
+    "Nejde mi prihlaseni do XDENTu a nevim, jestli je problem v certifikatu."
   ],
   support: [
     "Nejde mi odeslat ePoukaz, system pise chybu s uhradou. Co mam zkontrolovat?",
@@ -82,8 +82,8 @@ const emptySteps: AgentStep[] = [
 
 function App() {
   const [open, setOpen] = useState(false);
-  const [agentMode, setAgentMode] = useState<AgentMode>(() => loadJson<AgentMode>(STORAGE_AGENT_MODE, "support"));
-  const [message, setMessage] = useState(demoQuestions.support[0]);
+  const [agentMode, setAgentMode] = useState<AgentMode>(() => loadJson<AgentMode>(STORAGE_AGENT_MODE, "auto"));
+  const [message, setMessage] = useState(demoQuestions.auto[0]);
   const [messages, setMessages] = useState<ChatMessage[]>(() => loadJson<ChatMessage[]>(STORAGE_MESSAGES, []));
   const [patientMemory, setPatientMemory] = useState<UserInfo | null>(() => loadJson<UserInfo | null>(STORAGE_PATIENT_MEMORY, null));
   const [sessionId] = useState(() => loadOrCreateSessionId());
@@ -318,7 +318,7 @@ function App() {
         <XdentLogo />
         <div>
           <h1>XDENT chat asistent</h1>
-          <p>Minimalni podpora nad transkripcemi, pripravena jako vlozitelny chat widget.</p>
+          <p>Chatovy pomocnik pro pacienty i ordinaci. Vybere spravneho AI agenta, odpovi kratce a opre se o dostupne podklady.</p>
         </div>
       </div>
 
@@ -459,10 +459,11 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
     <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4">
       <div className="mb-2 flex items-center gap-2 font-semibold">
         <CheckCircle2 size={18} />
-        Pripraveno na dotaz
+        Napiste, co potrebujete vyresit
       </div>
       <p className="text-sm leading-6 text-slate-600">
-        Asistent odpovida kratce podle transkripci. U odpovedi uvidite jistotu a rozklikatelne podklady.
+        AI sama pozna, jestli jde o problem v XDENTu, bolest, objednani nebo predani cloveku.
+        U odpovedi uvidite jistotu a rozklikatelne podklady.
         {voiceOutputEnabled && " Hlasovy vystup je zapnuty a cte cesky."}
       </p>
     </div>
@@ -478,18 +479,18 @@ function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: 
         <div className="flex min-w-0 items-center gap-3">
           <div className="agent-handoff-icon">{active.icon}</div>
           <div className="min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Aktivni AI agent</div>
+            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Ted odpovida</div>
             <div className="truncate text-sm font-semibold text-ink">{active.label}</div>
             <div className="truncate text-xs text-slate-500">
-              {selected === "auto" ? "Orchestrator sam preda dotaz specialistovi" : active.hint}
+              {selected === "auto" ? "AI si sama vybere nejvhodnejsiho pomocnika" : active.hint}
             </div>
           </div>
         </div>
         <label className="agent-select-label">
-          Predat komu
+          Zmenit pomocnika
           <select className="agent-select" value={selected} onChange={(event) => onSelect(event.target.value as AgentMode)}>
             {agentOptions.map((agent) => (
-              <option key={agent.id} value={agent.id}>{agent.label} - {agent.hint}</option>
+              <option key={agent.id} value={agent.id}>{agent.label}: {agent.hint}</option>
             ))}
           </select>
         </label>
@@ -550,7 +551,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           <div className="mt-3 grid gap-2 text-xs">
             {routedByOrchestrator && (
               <div className="rounded-md border border-mint/20 bg-mint/10 p-2 text-mint">
-                <span className="font-semibold">AI predani:</span> {message.response.agent_route_reason ?? "Orchestrator vybral vhodneho specialistu."}
+                <span className="font-semibold">Proc odpovida tento pomocnik:</span> {message.response.agent_route_reason ?? "AI vybrala nejvhodnejsiho pomocnika."}
               </div>
             )}
             <div className="rounded-md bg-white/70 p-2 text-slate-600">
@@ -707,25 +708,25 @@ function urgencyLabel(value: UserInfo["urgency"]): string {
 
 function handoffMessage(mode: AgentMode, label: string): string {
   if (mode === "auto") {
-    return "Prepinam na AI orchestratora. Dalsi dotaz sam preda nejvhodnejsimu specialistovi.";
+    return "Zapinam chytry vyber. Napiste dotaz a AI sama rozhodne, ktery pomocnik ma odpovedet.";
   }
-  return `Predavam konverzaci agentovi: ${label}. Odpovi strucne a podle dostupnych podkladu.`;
+  return `Predavam konverzaci na: ${label}. Odpovi kratce a bude se drzet dostupnych podkladu.`;
 }
 
 function placeholderForAgent(agentMode: AgentMode): string {
-  if (agentMode === "auto") return "Napiste dotaz; AI sama vybere vhodneho specialistu...";
-  if (agentMode === "patient") return "Popiste problem, mesto a kontakt pacienta...";
-  if (agentMode === "triage") return "Popiste priznaky a jak dlouho trvaji...";
-  if (agentMode === "scheduler") return "Zadejte mesto, typ osetreni a kontakt...";
-  if (agentMode === "handoff") return "Popiste, co se ma predat podpore...";
-  return "Napiste dotaz k XDENTu...";
+  if (agentMode === "auto") return "Napiste svuj dotaz. AI sama vybere, kdo vam nejlepe pomuze...";
+  if (agentMode === "patient") return "Napiste jmeno, mesto, kontakt a co pacienta trapi...";
+  if (agentMode === "triage") return "Popiste bolest, otok, horecku, krvaceni a jak dlouho to trva...";
+  if (agentMode === "scheduler") return "Napiste mesto, typ osetreni a telefon/e-mail pro potvrzeni...";
+  if (agentMode === "handoff") return "Napiste, co ma recepce nebo podpora prevzit...";
+  return "Napiste dotaz k programu XDENT...";
 }
 
 function promptForAction(action: string, memory: UserInfo | null): string {
   const lowered = action.toLowerCase();
   if (lowered.includes("telefon") || lowered.includes("kontakt")) return "Telefon/e-mail pacienta je: ";
   if (lowered.includes("mesto")) return "Pacient je z mesta: ";
-  if (lowered.includes("popis")) return "Problem pacienta je: ";
+  if (lowered.includes("popis") || lowered.includes("trapi")) return "Pacienta trapi: ";
   if (lowered.includes("nejdrivejsi")) {
     const city = memory?.patient_city ? ` v ${memory.patient_city}` : "";
     return `Najdi nejdrivejsi termin${city}.`;
