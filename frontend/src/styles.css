@@ -36,6 +36,18 @@ body {
     @apply relative z-10 mt-0.5 text-[10px] font-black leading-none tracking-wide;
   }
 
+  .launcher-xdent-icon {
+    @apply inline-flex h-11 w-11 flex-col items-center justify-center rounded-full border border-white/30 bg-white/10 text-white;
+  }
+
+  .launcher-xdent-icon span {
+    @apply text-sm font-black leading-4 tracking-wide;
+  }
+
+  .launcher-xdent-icon small {
+    @apply text-[10px] font-black leading-3 tracking-wide text-white/80;
+  }
+
   .primary-button {
     @apply inline-flex h-10 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60;
   }
@@ -291,7 +303,7 @@ body {
     justify-content: center;
     border: 4px solid #ffffff;
     border-radius: 999px;
-    background: #1e9d73;
+    background: linear-gradient(135deg, #111827 0%, #1e9d73 100%);
     color: #ffffff;
     box-shadow: 0 18px 45px rgba(30, 157, 115, 0.38);
     transition: transform 160ms ease, background 160ms ease;

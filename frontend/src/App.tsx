@@ -10,7 +10,6 @@ import {
   HeartPulse,
   LifeBuoy,
   Loader2,
-  MessageSquare,
   Mic,
   MicOff,
   RefreshCw,
@@ -284,11 +283,13 @@ function App() {
   }
 
   async function handleIngest() {
+    if (indexing) return;
     setIndexing(true);
     setError(null);
     try {
       await ingestData();
       await refreshStats();
+      await refreshCacheStats();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Indexace se nepodarila.");
     } finally {
@@ -326,18 +327,18 @@ function App() {
       <div className="xdent-widget-background">
         <XdentLogo />
         <div>
-          <h1>XDENT chat asistent</h1>
+          <h1>XDent AI Asistent</h1>
           <p>Chatovy pomocnik pro pacienty i ordinaci. Vybere spravneho AI agenta, odpovi kratce a opre se o dostupne podklady.</p>
         </div>
       </div>
 
       {open && (
-        <section className={`xdent-chat-popup ${fontScaleClass(fontScale)}`} aria-label="XDENT chat">
+        <section className={`xdent-chat-popup ${fontScaleClass(fontScale)}`} aria-label="XDent AI Asistent chat">
           <header className="xdent-chat-header">
             <div className="flex min-w-0 items-center gap-3">
               <XdentLogo small />
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">XDENT asistent</div>
+                <div className="truncate text-sm font-semibold">XDent AI Asistent</div>
                 <div className="truncate text-xs text-white/75">{isIndexed ? `${stats?.points_count ?? 0} chunku v indexu` : "Index neni pripraveny"}</div>
               </div>
             </div>
@@ -399,9 +400,14 @@ function App() {
                 memory={patientMemory}
                 memoryUpdates={savedResponse?.memory_updates ?? []}
                 escalationPacket={latestEscalation}
+                indexing={indexing}
+                isIndexed={isIndexed}
+                pointsCount={stats?.points_count ?? 0}
+                apiReady={Boolean(stats?.api_ready)}
                 onCycleFont={() => setFontScale((current) => nextFontScale(current))}
                 onClose={() => setToolsOpen(false)}
                 onForgetMemory={clearPatientMemory}
+                onIngest={handleIngest}
               />
             )}
             <textarea
@@ -455,9 +461,18 @@ function App() {
       )}
 
       <button className="xdent-chat-launcher" onClick={() => setOpen((value) => !value)} aria-label={open ? "Zavrit chat" : "Otevrit chat"}>
-        {open ? <X size={26} /> : <MessageSquare size={27} />}
+        {open ? <X size={26} /> : <XdentLauncherIcon />}
       </button>
     </div>
+  );
+}
+
+function XdentLauncherIcon() {
+  return (
+    <span className="launcher-xdent-icon" aria-hidden="true">
+      <span>XD</span>
+      <small>AI</small>
+    </span>
   );
 }
 
@@ -582,17 +597,27 @@ function ChatToolsPanel({
   memory,
   memoryUpdates,
   escalationPacket,
+  indexing,
+  isIndexed,
+  pointsCount,
+  apiReady,
   onCycleFont,
   onClose,
   onForgetMemory,
+  onIngest,
 }: {
   fontScale: FontScale;
   memory: UserInfo | null;
   memoryUpdates: string[];
   escalationPacket: string | null;
+  indexing: boolean;
+  isIndexed: boolean;
+  pointsCount: number;
+  apiReady: boolean;
   onCycleFont: () => void;
   onClose: () => void;
   onForgetMemory: () => void;
+  onIngest: () => void;
 }) {
   const [copiedEscalation, setCopiedEscalation] = useState(false);
   const memoryItems = memoryChips(memory);
@@ -626,6 +651,25 @@ function ChatToolsPanel({
       </div>
 
       <div className="chat-tools-scroll thin-scroll">
+        <div className="tool-row">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-ink">Znalostni index</div>
+            <div className="truncate text-xs text-slate-500">
+              {isIndexed ? `${pointsCount} chunku pripraveno` : "Index zatim neni pripraveny"}
+            </div>
+          </div>
+          <button
+            className="quick-action inline-flex items-center gap-1"
+            type="button"
+            onClick={() => { void onIngest(); }}
+            disabled={indexing || !apiReady}
+            title={apiReady ? "Spustit indexaci transkripci" : "Chybi API klic pro embeddingy"}
+          >
+            {indexing ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />}
+            {isIndexed ? "Reindexovat" : "Indexovat"}
+          </button>
+        </div>
+
         <div className="tool-row">
           <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
           <button
@@ -683,8 +727,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   const sourceStrength = sourceStrengthPercent(message.response?.sources ?? []);
   const routedByOrchestrator = message.response?.requested_agent_mode === "auto";
   const assistantTitle = message.response
-    ? `${message.response.agent_label ?? "XDENT asistent"} - ${message.response.topic_label ?? "odpoved"}`
-    : "XDENT asistent";
+    ? `${message.response.agent_label ?? "XDent AI Asistent"} - ${message.response.topic_label ?? "odpoved"}`
+    : "XDent AI Asistent";
 
   async function copyContent() {
     await navigator.clipboard?.writeText(visibleContent);
