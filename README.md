@@ -15,7 +15,8 @@ AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení fu
 - Strict mode a bezpečný fallback.
 - Tolerantní režimy retrievalu: přesné, vyvážené a širší hledání v chuncích.
 - Chat history, uživatelský kontext a price info panel ve frontendu.
-- Hlasový vstup přes mikrofon a volitelné hlasové přečtení odpovědi v prohlížeči.
+- Hlasový vstup přes mikrofon a volitelné přečtení odpovědi v mužském nebo ženském hlasu.
+- Rozklikávací seznam konkrétních zdrojů přímo u odpovědi v chatu.
 - JSONL log interakcí pro vyhodnocení kvality.
 - Offline fallback skripty bez Dockeru a bez API klíče.
 

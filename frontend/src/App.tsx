@@ -73,6 +73,9 @@ const STORAGE_USER = "xdent.chat.user";
 const STORAGE_TOLERANCE = "xdent.chat.tolerance";
 const STORAGE_SESSION = "xdent.chat.session";
 const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
+const STORAGE_VOICE_GENDER = "xdent.chat.voiceGender";
+
+type VoiceGender = "female" | "male";
 
 function App() {
   const [activeTab, setActiveTab] = useState<"chat" | "history" | "price">("chat");
@@ -98,6 +101,9 @@ function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() =>
     loadJson<boolean>(STORAGE_VOICE_OUTPUT, false)
+  );
+  const [voiceGender, setVoiceGender] = useState<VoiceGender>(() =>
+    loadJson<VoiceGender>(STORAGE_VOICE_GENDER, "female")
   );
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -137,6 +143,7 @@ function App() {
   useEffect(() => { saveJson(STORAGE_USER, userInfo); }, [userInfo]);
   useEffect(() => { saveJson(STORAGE_TOLERANCE, retrievalTolerance); }, [retrievalTolerance]);
   useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
+  useEffect(() => { saveJson(STORAGE_VOICE_GENDER, voiceGender); }, [voiceGender]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -216,7 +223,7 @@ function App() {
     utterance.lang = "cs-CZ";
     utterance.rate = 1.05;
 
-    const czechVoice = ttsVoices.find((v) => v.lang.startsWith("cs"));
+    const czechVoice = selectPreferredVoice(ttsVoices, voiceGender);
     if (czechVoice) utterance.voice = czechVoice;
 
     utterance.onstart = () => setIsSpeaking(true);
@@ -224,7 +231,7 @@ function App() {
     utterance.onerror = () => setIsSpeaking(false);
 
     window.speechSynthesis.speak(utterance);
-  }, [voiceOutputEnabled, ttsVoices]);
+  }, [voiceOutputEnabled, ttsVoices, voiceGender]);
 
   function stopSpeaking() {
     window.speechSynthesis?.cancel();
@@ -479,7 +486,10 @@ function App() {
               voiceInputSupported={voiceInputSupported}
               voiceOutputSupported={voiceOutputSupported}
               voiceOutputEnabled={voiceOutputEnabled}
+              voiceGender={voiceGender}
+              selectedVoiceName={selectPreferredVoice(ttsVoices, voiceGender)?.name ?? null}
               onVoiceOutputChange={setVoiceOutputEnabled}
+              onVoiceGenderChange={setVoiceGender}
               isListening={isListening}
               isSpeaking={isSpeaking}
               onStartListening={startListening}
@@ -595,12 +605,38 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         {!isUser && message.response && (
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
             <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">jistota {Math.round(message.response.confidence * 100)} %</span>
-            <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">{message.response.sources.length} zdrojů</span>
+            <SourceDisclosure sources={message.response.sources} />
             {usage && <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">{formatUsd(usage.total_estimated_cost_usd)}</span>}
           </div>
         )}
       </div>
     </article>
+  );
+}
+
+function SourceDisclosure({ sources }: { sources: Source[] }) {
+  if (sources.length === 0) {
+    return <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">0 zdrojů</span>;
+  }
+
+  return (
+    <details className="w-full rounded-md bg-white/70 px-2 py-1 text-slate-600 md:w-auto">
+      <summary className="cursor-pointer list-none select-none">
+        {sources.length} zdrojů
+      </summary>
+      <div className="mt-2 grid gap-2 md:min-w-80">
+        {sources.map((source, index) => (
+          <div key={`${source.source}-${index}`} className="rounded-md border border-slate-200 bg-white p-2">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="truncate font-semibold">{index + 1}. {source.source}</span>
+              <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5">{source.score}</span>
+            </div>
+            {source.resolution && <div className="mb-1 leading-5 text-ink">{source.resolution}</div>}
+            <div className="line-clamp-3 leading-5 text-slate-500">{source.excerpt}</div>
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -682,7 +718,10 @@ function VoicePanel({
   voiceInputSupported,
   voiceOutputSupported,
   voiceOutputEnabled,
+  voiceGender,
+  selectedVoiceName,
   onVoiceOutputChange,
+  onVoiceGenderChange,
   isListening,
   isSpeaking,
   onStartListening,
@@ -692,7 +731,10 @@ function VoicePanel({
   voiceInputSupported: boolean;
   voiceOutputSupported: boolean;
   voiceOutputEnabled: boolean;
+  voiceGender: VoiceGender;
+  selectedVoiceName: string | null;
   onVoiceOutputChange: (v: boolean) => void;
+  onVoiceGenderChange: (v: VoiceGender) => void;
   isListening: boolean;
   isSpeaking: boolean;
   onStartListening: () => void;
@@ -742,6 +784,7 @@ function VoicePanel({
               <label className="flex cursor-pointer items-center justify-between gap-3 text-sm text-slate-600">
                 Automaticky číst odpovědi
                 <button
+                  type="button"
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${voiceOutputEnabled ? "bg-mint" : "bg-slate-200"}`}
                   onClick={() => onVoiceOutputChange(!voiceOutputEnabled)}
                   role="switch"
@@ -750,6 +793,30 @@ function VoicePanel({
                   <span className={`inline-block h-4 w-4 translate-x-1 rounded-full bg-white shadow transition-transform ${voiceOutputEnabled ? "translate-x-6" : ""}`} />
                 </button>
               </label>
+              <div>
+                <div className="mb-2 text-xs font-medium uppercase text-slate-400">Typ hlasu</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className={`mode-button min-h-12 ${voiceGender === "female" ? "mode-button-active" : ""}`}
+                    onClick={() => onVoiceGenderChange("female")}
+                  >
+                    <span>Ženský</span>
+                    <small>jemnější TTS</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={`mode-button min-h-12 ${voiceGender === "male" ? "mode-button-active" : ""}`}
+                    onClick={() => onVoiceGenderChange("male")}
+                  >
+                    <span>Mužský</span>
+                    <small>hlubší TTS</small>
+                  </button>
+                </div>
+                <div className="mt-2 truncate text-xs text-slate-500">
+                  Vybraný hlas: {selectedVoiceName ?? "výchozí hlas prohlížeče"}
+                </div>
+              </div>
               {isSpeaking && (
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-md border border-mint/40 bg-mint/10 px-3 py-1.5 text-xs text-mint"
@@ -893,7 +960,7 @@ function HistoryView({
               <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
               {item.response && (
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  <span className="rounded-md bg-slate-100 px-2 py-1">zdroje: {item.response.sources.length}</span>
+                  <SourceDisclosure sources={item.response.sources} />
                   <span className="rounded-md bg-slate-100 px-2 py-1">tolerance: {toleranceName(item.response.retrieval_tolerance)}</span>
                   <span className="rounded-md bg-slate-100 px-2 py-1">cena: {formatUsd(item.response.usage?.total_estimated_cost_usd ?? 0)}</span>
                 </div>
@@ -1247,6 +1314,29 @@ function formatUsd(value: number): string {
 
 function formatRate(value: number, currency: string): string {
   return value > 0 ? `${value} ${currency}` : "doplnit";
+}
+
+function selectPreferredVoice(voices: SpeechSynthesisVoice[], gender: VoiceGender): SpeechSynthesisVoice | null {
+  const czechVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("cs"));
+  const candidates = czechVoices.length > 0 ? czechVoices : voices;
+  const hints =
+    gender === "female"
+      ? ["female", "woman", "zena", "žena", "zuzana", "vlasta", "iveta", "tereza"]
+      : ["male", "man", "muz", "muž", "jakub", "antonin", "petr", "ondrej"];
+
+  const hinted = candidates.find((voice) => {
+    const name = normalizeVoiceName(voice.name);
+    return hints.some((hint) => name.includes(normalizeVoiceName(hint)));
+  });
+
+  return hinted ?? czechVoices[0] ?? voices[0] ?? null;
+}
+
+function normalizeVoiceName(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function toleranceName(value: RetrievalTolerance): string {

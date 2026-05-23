@@ -20,7 +20,7 @@ from .vectorstore import search_sources
 
 @lru_cache(maxsize=4)
 def _get_llm(model: str, api_key: str) -> ChatOpenAI:
-    return ChatOpenAI(model=model, api_key=api_key, temperature=0.2)
+    return ChatOpenAI(model=model, api_key=api_key, temperature=1)
 
 
 # Module-level cache singleton – initialised lazily on first use.
@@ -42,6 +42,9 @@ def get_agent_cache(settings: Settings) -> QueryCache:
 SYSTEM_PROMPT = """Jsi AI operátor 1. úrovně podpory pro stomatologický software XDENT.
 Odpovídej česky, velmi stručně a přímo k věci.
 Použij pouze dodané zdroje z transkripcí.
+Zdroje jsou seřazené podle relevance; odpověď stav hlavně na prvních zdrojích.
+Nesmíš míchat nesouvisející úryvky. Pokud zdroj popisuje jiný problém, ignoruj ho.
+Dej konkrétní postup jen tehdy, když je ve zdrojích opravdu uvedený.
 Pokud zdroje nestačí, řekni to a doporuč eskalaci na podporu.
 Na konec uveď krátký řádek `Zdroj: ...` a použij přesný název zdroje z kontextu, ne pouze číslo v hranaté závorce.
 Nevymýšlej postupy mimo kontext."""
@@ -106,13 +109,14 @@ class SupportAgent:
         )
 
         topic_hint = classified.topic if classified.confidence >= 0.35 else None
-        sources = search_sources(
+        retrieved_sources = search_sources(
             self.settings,
             message,
             top_k=top_k,
             topic_hint=topic_hint,
             tolerance=retrieval_tolerance,
         )
+        sources = self._select_answer_sources(retrieved_sources, classified.topic)
         best_score = max((source.score for source in sources), default=0.0)
         steps.append(
             AgentStep(
@@ -120,7 +124,8 @@ class SupportAgent:
                 label="Vyhledání v transkripcích",
                 status="done" if sources else "warning",
                 detail=(
-                    f"Nalezeno {len(sources)} relevantních částí hovorů "
+                    f"Nalezeno {len(retrieved_sources)} relevantních částí hovorů, "
+                    f"pro odpověď použito {len(sources)} zdrojů "
                     f"({self._tolerance_label(retrieval_tolerance)} hledání)."
                 ),
                 payload={
@@ -231,7 +236,7 @@ class SupportAgent:
                     "Téma: {topic}\n"
                     "Dotaz zákazníka: {message}\n\n"
                     "Zdroje:\n{sources}\n\n"
-                    "Odpověz maximálně 4 krátkými větami.",
+                    "Odpověz maximálně 4 krátkými větami. Neopakuj celý úryvek, vytáhni jen smysluplný postup.",
                 ),
             ]
         )
@@ -261,9 +266,21 @@ class SupportAgent:
             f"Zdroj: {best.source}"
         ), False
 
+    def _select_answer_sources(self, sources: list[Source], topic: str | None) -> list[Source]:
+        if not sources:
+            return []
+
+        if topic:
+            topic_sources = [source for source in sources if source.topic == topic]
+            if topic_sources:
+                return topic_sources[:4]
+
+        return sources[:4]
+
     def _source_context(self, sources: list[Source]) -> str:
         return "\n\n".join(
             f"[{index}] {source.source}\n"
+            f"Relevance: {source.score}\n"
             f"Shrnutí: {source.summary}\n"
             f"Možné řešení: {source.resolution}\n"
             f"Úryvek: {source.excerpt}"
