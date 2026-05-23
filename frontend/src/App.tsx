@@ -31,6 +31,9 @@ const STORAGE_SESSION = "xdent.chat.session";
 const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
 const STORAGE_AGENT_MODE = "xdent.chat.agentMode";
 const STORAGE_PATIENT_MEMORY = "xdent.chat.patientMemory";
+const STORAGE_FONT_SCALE = "xdent.chat.fontScale";
+
+type FontScale = "normal" | "large" | "xlarge";
 
 const agentOptions: Array<{ id: AgentMode; label: string; hint: string; icon: ReactNode }> = [
   { id: "auto", label: "Nechat AI vybrat", hint: "nejlepsi pomocnik podle dotazu", icon: <Zap size={15} /> },
@@ -98,6 +101,7 @@ function App() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() => loadJson<boolean>(STORAGE_VOICE_OUTPUT, false));
+  const [fontScale, setFontScale] = useState<FontScale>(() => loadJson<FontScale>(STORAGE_FONT_SCALE, "normal"));
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -112,6 +116,7 @@ function App() {
   const selectedVoice = selectCzechVoice(ttsVoices);
   const topFrequent = cacheStats?.top_frequent?.[0]?.query;
   const samples = demoQuestions[agentMode];
+  const frequentQuestions = useMemo(() => mergeFrequentQuestions(cacheStats?.top_frequent.map((item) => item.query) ?? [], samples), [cacheStats, samples]);
   const latestActions = savedResponse?.next_actions ?? [];
   const latestEscalation = savedResponse?.escalation_packet ?? null;
 
@@ -124,6 +129,7 @@ function App() {
   useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
   useEffect(() => { saveJson(STORAGE_AGENT_MODE, agentMode); }, [agentMode]);
   useEffect(() => { saveJson(STORAGE_PATIENT_MEMORY, patientMemory); }, [patientMemory]);
+  useEffect(() => { saveJson(STORAGE_FONT_SCALE, fontScale); }, [fontScale]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -325,7 +331,7 @@ function App() {
       </div>
 
       {open && (
-        <section className="xdent-chat-popup" aria-label="XDENT chat">
+        <section className={`xdent-chat-popup ${fontScaleClass(fontScale)}`} aria-label="XDENT chat">
           <header className="xdent-chat-header">
             <div className="flex min-w-0 items-center gap-3">
               <XdentLogo small />
@@ -390,13 +396,12 @@ function App() {
             </div>
           )}
 
-          <div className="xdent-chat-samples">
-            {samples.map((question) => (
-              <button key={question} className="sample-chip" onClick={() => setMessage(question)}>
-                {question}
-              </button>
-            ))}
-          </div>
+          <QuickQuestionsStrip
+            questions={frequentQuestions}
+            fontScale={fontScale}
+            onPickQuestion={setMessage}
+            onCycleFont={() => setFontScale((current) => nextFontScale(current))}
+          />
 
           <form className="xdent-chat-input" onSubmit={handleSend}>
             <textarea
@@ -538,17 +543,61 @@ function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: 
 
 function PatientMemoryStrip({ memory, updates, onForget }: { memory: UserInfo | null; updates: string[]; onForget: () => void }) {
   const chips = memoryChips(memory);
-  if (chips.length === 0 && updates.length === 0) return null;
+  const summary = updates.length ? `ulozeno: ${updates.join(", ")}` : chips.length ? `${chips.length} udaje` : "zatim prazdna";
 
   return (
     <details className="memory-strip">
       <summary>
         <span>Pamet pacienta</span>
-        <span className="text-slate-400">{updates.length ? `ulozeno: ${updates.join(", ")}` : `${chips.length} udaje`}</span>
+        <span className="text-slate-400">{summary}</span>
       </summary>
       <div className="mt-2 flex flex-wrap gap-2">
-        {chips.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)}
-        <button className="memory-forget" type="button" onClick={onForget}>Zapomenout udaje</button>
+        {chips.length > 0
+          ? chips.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
+          : <span className="text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
+        {chips.length > 0 && <button className="memory-forget" type="button" onClick={onForget}>Zapomenout udaje</button>}
+      </div>
+    </details>
+  );
+}
+
+function QuickQuestionsStrip({
+  questions,
+  fontScale,
+  onPickQuestion,
+  onCycleFont,
+}: {
+  questions: string[];
+  fontScale: FontScale;
+  onPickQuestion: (question: string) => void;
+  onCycleFont: () => void;
+}) {
+  return (
+    <details className="quick-strip">
+      <summary>
+        <span>Časté dotazy</span>
+        <span className="text-slate-400">{questions.length} rychlych voleb</span>
+      </summary>
+      <div className="quick-strip-content">
+        <div className="quick-font-row">
+          <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
+          <button
+            className="font-size-button font-size-button-a"
+            type="button"
+            title="Zvětšení písma"
+            aria-label="Zvětšení písma"
+            onClick={onCycleFont}
+          >
+            A
+          </button>
+        </div>
+        <div className="quick-question-grid">
+          {questions.map((question) => (
+            <button key={question} className="sample-chip" type="button" onClick={() => onPickQuestion(question)}>
+              {question}
+            </button>
+          ))}
+        </div>
       </div>
     </details>
   );
@@ -772,6 +821,35 @@ function promptForAction(action: string, memory: UserInfo | null): string {
   if (lowered.includes("2. urovni")) return "Predat 2. urovni podpory: ";
   if (lowered.includes("zavolat")) return "Chci kontakt na nejvhodnejsi ordinaci pro akutni pripad.";
   return action;
+}
+
+function mergeFrequentQuestions(frequent: string[], samples: string[]): string[] {
+  const merged: string[] = [];
+  for (const question of [...frequent, ...samples]) {
+    const cleaned = question.trim();
+    if (!cleaned || merged.includes(cleaned)) continue;
+    merged.push(cleaned);
+    if (merged.length >= 6) break;
+  }
+  return merged;
+}
+
+function nextFontScale(current: FontScale): FontScale {
+  if (current === "normal") return "large";
+  if (current === "large") return "xlarge";
+  return "normal";
+}
+
+function fontScaleClass(value: FontScale): string {
+  if (value === "large") return "font-large";
+  if (value === "xlarge") return "font-xlarge";
+  return "";
+}
+
+function fontScaleLabel(value: FontScale): string {
+  if (value === "large") return "vetsi";
+  if (value === "xlarge") return "nejvetsi";
+  return "normalni";
 }
 
 function loadJson<T>(key: string, fallback: T): T {
