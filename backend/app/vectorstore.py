@@ -20,6 +20,7 @@ from xdent_assistant.text import best_sentences, tokenize
 from xdent_assistant.topics import TOPICS, classify_topic, label_for
 
 from .config import Settings
+from .seed_qa import SEED_QA
 from .schemas import IngestResponse, Source, StatsResponse
 from .utils import compact_text
 
@@ -124,6 +125,7 @@ def _ingest_transcripts_unlocked(settings: Settings, *, recreate: bool) -> Inges
                 page_content=chunk.text,
                 metadata={
                     **chunk.metadata,
+                    "doc_type": "transcript",
                     "chunk_id": chunk.id,
                     "source": source_label(chunk),
                     "topic_label": label_for(topic),
@@ -134,6 +136,30 @@ def _ingest_transcripts_unlocked(settings: Settings, *, recreate: bool) -> Inges
                     "resolution": resolution,
                     "summary": summary,
                     "quality": _quality_score(chunk.text, resolution),
+                },
+            )
+        )
+
+    for item in SEED_QA:
+        topic = item["topic"]
+        document_id = _stable_id(f"qa:{item['id']}")
+        ids.append(document_id)
+        documents.append(
+            Document(
+                page_content=f"Otazka: {item['question']}\nOdpoved: {item['answer']}",
+                metadata={
+                    "doc_type": "qa_seed",
+                    "chunk_id": item["id"],
+                    "source": f"Predpripravena Q&A: {label_for(topic)}",
+                    "topic": topic,
+                    "topic_label": label_for(topic),
+                    "auto_topic": topic,
+                    "auto_topic_label": label_for(topic),
+                    "auto_topic_confidence": 1.0,
+                    "intent": item["question"],
+                    "resolution": item["answer"],
+                    "summary": item["answer"],
+                    "quality": 0.92,
                 },
             )
         )
@@ -210,9 +236,109 @@ def search_sources(
                 summary=metadata.get("summary"),
                 intent=metadata.get("intent"),
                 resolution=metadata.get("resolution"),
+                source_type=metadata.get("doc_type") or "transcript",
             )
         )
     return sources
+
+
+def search_qa_sources(
+    settings: Settings,
+    query: str,
+    *,
+    top_k: int = 3,
+    topic_hint: str | None = None,
+) -> list[Source]:
+    try:
+        store = build_vector_store(settings)
+    except Exception:
+        return []
+
+    must = [
+        qdrant_models.FieldCondition(
+            key="metadata.doc_type",
+            match=qdrant_models.MatchAny(any=["qa_seed", "qa_generated"]),
+        )
+    ]
+    if topic_hint:
+        must.append(
+            qdrant_models.FieldCondition(
+                key="metadata.topic",
+                match=qdrant_models.MatchValue(value=topic_hint),
+            )
+        )
+    qa_filter = qdrant_models.Filter(must=must)
+
+    try:
+        docs_with_scores = store.similarity_search_with_score(query, k=top_k, filter=qa_filter)
+    except Exception:
+        return []
+
+    sources: list[Source] = []
+    for doc, score in docs_with_scores:
+        metadata = doc.metadata
+        sources.append(
+            Source(
+                source=str(metadata.get("source") or metadata.get("chunk_id") or "Q&A"),
+                topic=metadata.get("topic"),
+                score=round(float(score), 4),
+                excerpt=compact_text(doc.page_content, limit=520),
+                summary=metadata.get("summary"),
+                intent=metadata.get("intent"),
+                resolution=metadata.get("resolution"),
+                source_type=metadata.get("doc_type") or "qa_generated",
+            )
+        )
+    return sources
+
+
+def upsert_generated_qa(
+    settings: Settings,
+    *,
+    question: str,
+    answer: str,
+    topic: str | None,
+) -> Source | None:
+    try:
+        store = build_vector_store(settings)
+    except Exception:
+        return None
+
+    topic_label = label_for(topic)
+    qa_id = _stable_id(f"generated-qa:{question}")
+    source = f"Nova Q&A polozka: {topic_label}"
+    document = Document(
+        page_content=f"Otazka: {question}\nOdpoved: {answer}",
+        metadata={
+            "doc_type": "qa_generated",
+            "chunk_id": f"generated-{qa_id}",
+            "source": source,
+            "topic": topic,
+            "topic_label": topic_label,
+            "auto_topic": topic,
+            "auto_topic_label": topic_label,
+            "auto_topic_confidence": 0.45,
+            "intent": question,
+            "resolution": answer,
+            "summary": answer,
+            "quality": 0.45,
+        },
+    )
+    try:
+        store.add_documents([document], ids=[qa_id])
+    except Exception:
+        return None
+    clear_stats_cache()
+    return Source(
+        source=source,
+        topic=topic,
+        score=0.45,
+        excerpt=compact_text(document.page_content, limit=520),
+        summary=answer,
+        intent=question,
+        resolution=answer,
+        source_type="qa_generated",
+    )
 
 
 def _effective_k(top_k: int, tolerance: str) -> int:

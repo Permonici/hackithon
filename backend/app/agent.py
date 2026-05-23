@@ -29,7 +29,7 @@ from .schemas import (
 )
 from .topics import classify_topic, label_for
 from .utils import append_jsonl, utc_now
-from .vectorstore import search_sources
+from .vectorstore import search_qa_sources, search_sources, upsert_generated_qa
 
 
 @lru_cache(maxsize=4)
@@ -102,40 +102,22 @@ def get_agent_cache(settings: Settings) -> QueryCache:
 
 SYSTEM_PROMPT = """Jsi AI operátor 1. úrovně podpory pro stomatologický software XDENT.
 Odpovídej česky, velmi stručně a přímo k věci.
+Hlavní cíl je odpovědět na položenou otázku k XDENTu, ne vést objednávací nebo pacientský proces.
 Použij pouze dodané zdroje z transkripcí.
 Zdroje jsou seřazené podle relevance; odpověď stav hlavně na prvních zdrojích.
 Nesmíš míchat nesouvisející úryvky. Pokud zdroj popisuje jiný problém, ignoruj ho.
 Dej konkrétní postup jen tehdy, když je ve zdrojích opravdu uvedený.
 Urgenci pacienta použij jen pro doporučení priority dalšího postupu, ne pro vymýšlení neověřených řešení.
+Neobjednávej pacienta, nehledat termíny ani ordinace; pokud se na to uživatel ptá, stručně řekni, že tento chat řeší podporu XDENTu.
 Pokud zdroje nestačí, řekni to a doporuč eskalaci na podporu.
 Do textu odpovědi nikdy nepiš řádek `Zdroj:`; zdroje se uživateli ukazují samostatně v tlačítku.
 Nevymýšlej postupy mimo kontext."""
 
 
 AGENT_PROFILES = {
-    "auto": {
-        "label": "Chytry vyber pomoci",
-        "instruction": "Vyber nejvhodnejsiho pomocnika podle dotazu a drz odpoved velmi kratkou.",
-    },
     "support": {
-        "label": "Problem s programem XDENT",
-        "instruction": "Res technicke dotazy k XDENTu podle transkripci.",
-    },
-    "patient": {
-        "label": "Pruvodce pacienta",
-        "instruction": "Sbirej jen nutne udaje pacienta, vyhodnot urgenci a navrhni dalsi krok lidsky a strucne.",
-    },
-    "triage": {
-        "label": "Bolest nebo akutni stav",
-        "instruction": "Vyhodnot nalehavost pacienta a rekni nejbezpecnejsi dalsi krok.",
-    },
-    "scheduler": {
-        "label": "Najit nejdrivejsi termin",
-        "instruction": "Hledej nejdrivejsi vhodny termin a hlidej, zda jsou ulozene kontaktni udaje.",
-    },
-    "handoff": {
-        "label": "Predat cloveku",
-        "instruction": "Priprav kratke predani pro podporu nebo recepci, kdyz chybi jistota nebo udaje.",
+        "label": "XDent AI Asistent",
+        "instruction": "Odpovidej primo na dotaz k XDENTu podle transkripci. Neobjednavej pacienta, nehledas terminy ani ordinace.",
     },
 }
 
@@ -191,22 +173,18 @@ class SupportAgent:
         session_id: str | None = None,
         user: UserInfo | None = None,
     ) -> ChatResponse:
-        requested_agent_mode = self._normalize_agent_mode(agent_mode)
-        agent_mode, route_reason = self._route_agent(message, requested_agent_mode, user)
+        requested_agent_mode = "support"
+        agent_mode = "support"
+        route_reason = "Jednotny XDent AI Asistent odpovida primo na dotaz podle dostupnych podkladu."
         profile = AGENT_PROFILES[agent_mode]
-        memory_store = get_patient_memory_store(str(self.settings.logs_dir / "patient_memory.json"))
-        effective_user, memory_updates = memory_store.merge(
-            session_id=session_id,
-            incoming=user,
-            message=message,
-            agent_mode=agent_mode,
-        )
+        effective_user = None
+        memory_updates: list[str] = []
 
         # ── cache lookup ──────────────────────────────────────────────────────
         cache = get_agent_cache(self.settings)
         cache_key, normalized_query = cache.build_key(message, strict_mode, retrieval_tolerance, top_k)
         cache.record_query(normalized_query)
-        can_use_cache = agent_mode == "support" and not self._has_case_context(effective_user) and not memory_updates
+        can_use_cache = False
         cached = cache.get(cache_key) if can_use_cache else None
         if cached is not None:
             return cached.model_copy(update={
@@ -224,9 +202,9 @@ class SupportAgent:
         steps.append(
             AgentStep(
                 id="agent",
-                label="Predani AI agentovi",
+                label="XDent AI Asistent",
                 status="done",
-                detail=f"{route_reason} Aktivni agent: {profile['label']}.",
+                detail=route_reason,
                 payload={
                     "requested_agent_mode": requested_agent_mode,
                     "agent_mode": agent_mode,
@@ -246,6 +224,58 @@ class SupportAgent:
                 )
             )
 
+        if self._looks_like_patient_booking_request(message):
+            steps.extend(
+                [
+                    AgentStep(
+                        id="classify",
+                        label="Rozpoznani tematu",
+                        status="warning",
+                        detail="Dotaz vypada jako objednani pacienta, ne jako podpora XDENTu.",
+                        payload={"topic": "out-of-scope", "label": "Mimo podporu XDENT"},
+                    ),
+                    AgentStep(
+                        id="answer",
+                        label="Sestaveni odpovedi",
+                        status="done",
+                        detail="Asistent zustal u podpory XDENTu a nespustil objednavani.",
+                        payload={"used_llm": False},
+                    ),
+                ]
+            )
+            response = ChatResponse(
+                answer=(
+                    "Objednani pacienta ani hledani terminu v tomto chatu nedelam. "
+                    "Tento asistent pomaha s dotazy k XDENTu. "
+                    "Napiste prosim, co v programu nefunguje nebo co potrebujete nastavit."
+                ),
+                topic="out-of-scope",
+                topic_label="Mimo podporu XDENT",
+                confidence=0.0,
+                answer_confidence=0.2,
+                agent_mode=agent_mode,
+                agent_label=profile["label"],
+                requested_agent_mode=requested_agent_mode,
+                agent_route_reason=route_reason,
+                sources=[],
+                chunks_considered=0,
+                chunks_used=0,
+                steps=steps,
+                escalation_packet=None,
+                used_llm=False,
+                session_id=session_id,
+                user=None,
+                retrieval_tolerance=retrieval_tolerance,
+                usage=self._estimate_usage(message, "", [], False),
+                triage=None,
+                clinics=[],
+                appointment=None,
+                memory_updates=[],
+                next_actions=[],
+            )
+            self._log(message, response)
+            return response
+
         classified = classify_topic(message)
         classify_step_index = len(steps)
         steps.append(
@@ -263,6 +293,20 @@ class SupportAgent:
         )
 
         topic_hint = classified.topic if classified.confidence >= 0.35 else None
+        qa_sources = search_qa_sources(
+            self.settings,
+            message,
+            top_k=min(3, max(1, top_k)),
+            topic_hint=topic_hint,
+        )
+        qa_best_score = max((source.score for source in qa_sources), default=0.0)
+        qa_answer_ready = bool(
+            qa_sources
+            and (
+                qa_best_score >= self.settings.qa_match_min_score
+                or self._source_query_alignment(message, qa_sources) >= 0.58
+            )
+        )
         retrieved_sources = search_sources(
             self.settings,
             message,
@@ -270,6 +314,11 @@ class SupportAgent:
             topic_hint=topic_hint,
             tolerance=retrieval_tolerance,
         )
+        if qa_answer_ready:
+            retrieved_sources = qa_sources + [
+                source for source in retrieved_sources
+                if source.source_type == "transcript"
+            ]
         classified = self._refine_topic(classified, retrieved_sources)
         steps[classify_step_index] = AgentStep(
             id="classify",
@@ -307,10 +356,14 @@ class SupportAgent:
         sources = self._prune_answer_sources(sources, min_score)
         best_score = max((source.score for source in sources), default=0.0)
         retrieval_detail = (
-            f"Nalezeno {len(retrieved_sources)} relevantnich casti hovoru, "
+            f"Nalezeno {len(retrieved_sources)} relevantnich zdroju/chunku, "
             f"pro odpoved pouzito {len(sources)} zdroju "
             f"({self._tolerance_label(effective_retrieval_tolerance)} hledani)."
         )
+        if qa_sources:
+            retrieval_detail += f" Znalostni Q&A vratila {len(qa_sources)} kandidaty."
+        if qa_answer_ready:
+            retrieval_detail += " Pouzita byla predpripravena nebo drive naucena Q&A odpoved."
         if retrieval_fallback_used:
             retrieval_detail += " AI rozsiril hledani, protoze prvni shoda byla slaba."
         steps.append(
@@ -325,6 +378,9 @@ class SupportAgent:
                     "effective_tolerance": effective_retrieval_tolerance,
                     "detail": retrieval_detail,
                     "fallback_used": retrieval_fallback_used,
+                    "qa_candidates": len(qa_sources),
+                    "chunks_considered": len(retrieved_sources),
+                    "chunks_used": len(sources),
                     "sources": [source.model_dump() for source in sources[:3]],
                 },
             )
@@ -359,47 +415,51 @@ class SupportAgent:
             sources = []
             best_score = 0.0
 
-        wants_care = agent_mode in {"patient", "triage", "scheduler", "handoff"} or self._wants_care_workflow(message, effective_user)
-        care_result = self._run_care_workflow(message, effective_user, force_booking=agent_mode == "scheduler") if wants_care else None
-        if care_result:
-            steps.extend(care_result.steps)
+        care_result = None
 
-        if agent_mode == "handoff":
-            escalation_packet = self._build_escalation_packet(
-                message=message,
-                topic=classified.label,
-                reason="Uzivatel zvolil predani cloveku nebo je potreba rychle predani.",
-                user=effective_user,
-                sources=sources,
-                care=care_result,
-            )
-            answer = self._compose_handoff_answer(effective_user, care_result)
-            used_llm = False
-            answer_status = "done"
-            answer_detail = "Predani cloveku je pripravene."
-        elif care_result and agent_mode in {"patient", "triage", "scheduler"}:
-            escalation_packet = None
-            answer = self._compose_care_answer(care_result, effective_user, agent_mode)
-            used_llm = False
-            answer_status = "done"
-            answer_detail = f"{profile['label']} sestavil kratky dalsi krok bez zbytecneho LLM volani."
-        elif not grounded:
-            fallback_topic_label = classified.label if evidence.query_alignment >= 0.30 else "Nejiste tema"
-            escalation_packet = create_escalation_packet_tool.invoke(
-                {
-                    "message": message,
-                    "topic": fallback_topic_label,
-                    "reason": "Nízká shoda v transkripcích nebo chybějící ověřený postup.",
-                }
-            )
-            answer = (
-                f"Téma: {classified.label}.\n"
-                "V dostupných transkripcích k tomu nemám dost jistý podklad. "
-                "Předejte dotaz 2. úrovni podpory a přiložte přesnou chybovou hlášku nebo screenshot."
-            )
-            used_llm = False
-            answer_status = "done"
-            answer_detail = "Odpověď je bezpečně eskalovaná."
+        if not grounded:
+            generated_answer = self._draft_unverified_answer(message, classified.label)
+            generated_source = None
+            if generated_answer:
+                generated_source = upsert_generated_qa(
+                    self.settings,
+                    question=message,
+                    answer=generated_answer,
+                    topic=classified.topic,
+                )
+
+            if generated_answer and generated_source:
+                answer = generated_answer
+                sources = [generated_source]
+                escalation_packet = None
+                used_llm = True
+                answer_status = "warning"
+                answer_detail = "Ve zdrojich nebyla jista shoda, proto vznikla kratka navrzena Q&A odpoved a ulozila se do vektorove databaze."
+                steps.append(
+                    AgentStep(
+                        id="learn",
+                        label="Ulozeni nove Q&A",
+                        status="done",
+                        detail="Nova otazka a navrzena odpoved byly ulozeny pro dalsi vyhledavani.",
+                        payload={"source": generated_source.model_dump()},
+                    )
+                )
+            else:
+                fallback_topic_label = classified.label if evidence.query_alignment >= 0.30 else "Nejiste tema"
+                escalation_packet = create_escalation_packet_tool.invoke(
+                    {
+                        "message": message,
+                        "topic": fallback_topic_label,
+                        "reason": "Nizka shoda v transkripcich, chybejici overeny postup a nepodarilo se vytvorit pouzitelny navrh odpovedi.",
+                    }
+                )
+                answer = (
+                    "K tomuto dotazu nemam dost jistou odpoved ani pouzitelny navrh. "
+                    "Predavam prosim dotaz lidskemu operatorovi podpory."
+                )
+                used_llm = False
+                answer_status = "done"
+                answer_detail = "Odpoved se nepodarilo bezpecne doplnit, proto je pripravena eskalace."
         else:
             escalation_packet = None
             try:
@@ -411,11 +471,9 @@ class SupportAgent:
                 answer_status = "warning"
                 answer_detail = f"LLM odpověď se nepodařila, použit bezpečný fallback ze zdrojů: {exc}"
 
-        if agent_mode != "handoff" and (not grounded or (care_result and self._needs_escalation(care_result))):
+        if not grounded and not sources:
             reason = (
                 "Nizka shoda v transkripcich nebo chybejici overeny postup."
-                if not grounded
-                else "Pacientsky pripad vyzaduje rychle predani recepci nebo 2. urovni."
             )
             escalation_packet = self._build_escalation_packet(
                 message=message,
@@ -426,10 +484,7 @@ class SupportAgent:
                 care=care_result,
             )
 
-        if care_result and agent_mode == "support":
-            answer = self._append_care_context(answer, care_result)
-
-        answer = self._tighten_answer(self._strip_source_lines(answer), max_lines=6 if care_result else 4)
+        answer = self._tighten_answer(self._strip_source_lines(answer), max_lines=4)
 
         steps.append(
             AgentStep(
@@ -452,6 +507,8 @@ class SupportAgent:
             requested_agent_mode=requested_agent_mode,
             agent_route_reason=route_reason,
             sources=sources,
+            chunks_considered=len(retrieved_sources),
+            chunks_used=len(sources),
             steps=steps,
             escalation_packet=escalation_packet,
             used_llm=used_llm,
@@ -499,7 +556,9 @@ class SupportAgent:
                     "- pojmenuj konkretni problem uzivatele;\n"
                     "- pouzij jen zdroje, ktere resi stejny problem;\n"
                     "- pokud zdroj nerika overeny postup, napis ze konkretni postup neni v podkladech;\n"
-                    "- neslibuj hotovou opravu, pokud zdroje obsahuji jen predani nebo vzdalenou kontrolu.\n\n"
+                    "- neslibuj hotovou opravu, pokud zdroje obsahuji jen predani nebo vzdalenou kontrolu;\n"
+                    "- neobjednavej pacienta, nenabizej terminy a nehledej ordinace;\n"
+                    "- formuluj odpoved prirozene a ne porad stejnymi slovy, ale porad jen podle zdroju.\n\n"
                     "Odpověz maximálně 3 krátkými větami. Neopakuj celý úryvek, vytáhni jen smysluplný postup.",
                 ),
             ]
@@ -514,6 +573,35 @@ class SupportAgent:
             }
         )
         return str(result.content).strip(), True
+
+    def _draft_unverified_answer(self, message: str, topic_label: str) -> str | None:
+        if not self.settings.openai_api_key:
+            return None
+
+        llm = _get_llm(self.settings.openai_chat_model, self.settings.openai_api_key)
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "Jsi AI operator podpory XDENT. Pro tento dotaz nebyl nalezen dostatecny zdroj. "
+                    "Navrhni pouze obecnou, opatrnou a velmi strucnou odpoved pro 1. uroven podpory. "
+                    "Nevydavej ji za overenou informaci z transkripci. Pokud nejde odpovedet smysluplne, vrat presne: ESCALATE.",
+                ),
+                (
+                    "human",
+                    "Tema: {topic}\n"
+                    "Dotaz: {message}\n\n"
+                    "Odpovez maximalne 2 kratkymi vetami. Musi byt prakticka, textova a bez zdroju v tele odpovedi.",
+                ),
+            ]
+        )
+        result = (prompt | llm).invoke({"topic": topic_label, "message": message})
+        answer = str(result.content).strip()
+        if not answer or answer.upper().startswith("ESCALATE"):
+            return None
+        if len(answer) < 12:
+            return None
+        return answer
 
     def _fallback_answer(self, topic_label: str, sources: list[Source], message: str | None = None) -> tuple[str, bool]:
         if not sources:
@@ -674,6 +762,61 @@ class SupportAgent:
             (care.triage and care.triage.urgency == "critical")
             or (care.appointment and care.appointment.status in {"needs_contact", "unavailable"})
         )
+
+    def _looks_like_patient_booking_request(self, message: str) -> bool:
+        text = self._plain(message)
+        booking_terms = (
+            "objednej",
+            "objednat me",
+            "rezervuj",
+            "najdi mi termin",
+            "nejdrivejsi termin",
+            "nejblizsi termin",
+            "termin k zubari",
+            "ordinace pobliz",
+            "hledam zubare",
+        )
+        if not any(term in text for term in booking_terms):
+            return False
+
+        software_terms = (
+            "xdent",
+            "program",
+            "software",
+            "aplikac",
+            "modul",
+            "kalendar",
+            "nastav",
+            "sablon",
+            "tisk",
+            "erecept",
+            "epoukaz",
+            "certifikat",
+            "prihlas",
+            "chyba",
+            "nefunguje",
+            "nejde",
+            "nelze",
+            "odeslat",
+            "sukl",
+            "vzp",
+        )
+        if any(term in text for term in software_terms):
+            return False
+
+        patient_terms = (
+            "k zubari",
+            "u zubare",
+            "zubare",
+            "boli me",
+            "bolest zubu",
+            "dentalni hygien",
+            "jsem z",
+            "v praze",
+            "v brne",
+            "prijima nove",
+        )
+        return any(term in text for term in patient_terms)
 
     def _compose_handoff_answer(self, user: UserInfo | None, care: CareWorkflowResult | None) -> str:
         missing = self._missing_patient_fields(user, require_location=True)
@@ -1295,6 +1438,8 @@ class SupportAgent:
                 "confidence": response.confidence,
                 "answer_confidence": response.answer_confidence,
                 "sources": [source.model_dump() for source in response.sources],
+                "chunks_considered": response.chunks_considered,
+                "chunks_used": response.chunks_used,
                 "used_llm": response.used_llm,
                 "session_id": response.session_id,
                 "review_ready": True,

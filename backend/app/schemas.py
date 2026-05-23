@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-AgentMode = Literal["auto", "support", "patient", "triage", "scheduler", "handoff"]
+AgentMode = Literal["support"]
 
 
 class UserInfo(BaseModel):
@@ -44,6 +44,7 @@ class Source(BaseModel):
     summary: str | None = None
     intent: str | None = None
     resolution: str | None = None
+    source_type: Literal["transcript", "qa_seed", "qa_generated"] = "transcript"
 
 
 class AgentStep(BaseModel):
@@ -110,6 +111,8 @@ class ChatResponse(BaseModel):
     confidence: float
     answer_confidence: float | None = None
     sources: list[Source]
+    chunks_considered: int = 0
+    chunks_used: int = 0
     steps: list[AgentStep]
     escalation_packet: str | None = None
     used_llm: bool

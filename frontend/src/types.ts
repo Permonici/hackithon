@@ -1,5 +1,4 @@
 export type RetrievalTolerance = "strict" | "balanced" | "broad";
-export type AgentMode = "auto" | "support" | "patient" | "triage" | "scheduler" | "handoff";
 
 export type UserInfo = {
   name?: string | null;
@@ -35,6 +34,7 @@ export type Source = {
   summary?: string | null;
   intent?: string | null;
   resolution?: string | null;
+  source_type: "transcript" | "qa_seed" | "qa_generated";
 };
 
 export type UsageEstimate = {
@@ -84,15 +84,17 @@ export type AppointmentProposal = {
 
 export type ChatResponse = {
   answer: string;
-  agent_mode: AgentMode;
+  agent_mode: "support";
   agent_label: string;
-  requested_agent_mode: AgentMode;
+  requested_agent_mode: "support";
   agent_route_reason?: string | null;
   topic: string;
   topic_label: string;
   confidence: number;
   answer_confidence?: number | null;
   sources: Source[];
+  chunks_considered: number;
+  chunks_used: number;
   steps: AgentStep[];
   escalation_packet?: string | null;
   used_llm: boolean;
@@ -125,12 +127,10 @@ export type StatsResponse = {
 
 export type ChatRequestPayload = {
   message: string;
-  agent_mode: AgentMode;
   strict_mode: boolean;
   top_k: number;
   retrieval_tolerance: RetrievalTolerance;
   session_id: string;
-  user?: UserInfo | null;
 };
 
 export type FrequentQuery = {

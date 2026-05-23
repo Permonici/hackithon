@@ -96,9 +96,9 @@ async def chat_stream(request: ChatRequest) -> StreamingResponse:
         for running_step in [
             {
                 "id": "agent",
-                "label": "Predani AI agentovi",
+                "label": "XDent AI Asistent",
                 "status": "running",
-                "detail": "AI orchestrator vybira specialistu." if request.agent_mode == "auto" else f"Aktivni rezim: {request.agent_mode}.",
+                "detail": "Asistent pripravuje odpoved podle dostupnych zdroju.",
             },
             {"id": "classify", "label": "Rozpoznání tématu", "status": "running", "detail": "Agent třídí dotaz podle podpůrných oblastí."},
             {"id": "retrieve", "label": "Vyhledání v transkripcích", "status": "running", "detail": "Qdrant hledá nejbližší případy a zdroje."},

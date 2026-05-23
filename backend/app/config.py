@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     strict_min_score: float = Field(default=0.35, validation_alias="STRICT_MIN_SCORE")
     lenient_min_score: float = Field(default=0.18, validation_alias="LENIENT_MIN_SCORE")
     broad_min_score: float = Field(default=0.10, validation_alias="BROAD_MIN_SCORE")
+    qa_match_min_score: float = Field(default=0.55, validation_alias="QA_MATCH_MIN_SCORE")
 
     cors_origins: str = Field(default="http://localhost:5173,http://localhost:8080", validation_alias="CORS_ORIGINS")
 
