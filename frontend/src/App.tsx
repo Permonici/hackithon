@@ -1,7 +1,6 @@
 import {
   Activity,
   AlertTriangle,
-  Bot,
   CheckCircle2,
   Clock3,
   Copy,
@@ -14,13 +13,19 @@ import {
   MessageSquare,
   Mic,
   MicOff,
+  Minus,
+  Moon,
+  Plus,
   RefreshCw,
   Send,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Stethoscope,
+  Sun,
   Trash2,
   TrendingUp,
+  Type,
   User,
   Volume2,
   VolumeX,
@@ -59,7 +64,12 @@ const defaultUser: UserInfo = {
   clinic: "",
   role: "",
   software_version: "",
-  contact: ""
+  contact: "",
+  patient_name: "",
+  patient_identifier: "",
+  patient_age: "",
+  urgency: "normal",
+  problem_summary: ""
 };
 
 const toleranceOptions: Array<{ value: RetrievalTolerance; label: string; hint: string }> = [
@@ -74,11 +84,17 @@ const STORAGE_TOLERANCE = "xdent.chat.tolerance";
 const STORAGE_SESSION = "xdent.chat.session";
 const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
 const STORAGE_VOICE_GENDER = "xdent.chat.voiceGender";
+const STORAGE_THEME = "xdent.ui.theme";
+const STORAGE_FONT_SIZE = "xdent.ui.fontSize";
 
 type VoiceGender = "female" | "male";
+type ThemeMode = "light" | "dark";
+type FontSizeMode = "normal" | "large" | "xlarge";
 
 function App() {
   const [activeTab, setActiveTab] = useState<"chat" | "history" | "price">("chat");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadJson<ThemeMode>(STORAGE_THEME, "light"));
+  const [fontSizeMode, setFontSizeMode] = useState<FontSizeMode>(() => loadJson<FontSizeMode>(STORAGE_FONT_SIZE, "normal"));
   const [message, setMessage] = useState(demoQuestions[0]);
   const [strictMode, setStrictMode] = useState(false);
   const [retrievalTolerance, setRetrievalTolerance] = useState<RetrievalTolerance>(() =>
@@ -122,6 +138,7 @@ function App() {
   const steps = loading ? liveSteps : visibleResponse?.steps ?? liveSteps;
   const sources = visibleResponse?.sources ?? sourcesFromSteps(liveSteps);
   const topScore = Math.max(0, ...sources.map((source) => source.score));
+  const fontScaleClass = fontSizeMode === "xlarge" ? "font-xlarge" : fontSizeMode === "large" ? "font-large" : "font-normal";
   const sessionCost = useMemo(
     () => messages.reduce((sum, item) => sum + (item.response?.usage?.total_estimated_cost_usd ?? 0), 0),
     [messages]
@@ -144,6 +161,12 @@ function App() {
   useEffect(() => { saveJson(STORAGE_TOLERANCE, retrievalTolerance); }, [retrievalTolerance]);
   useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
   useEffect(() => { saveJson(STORAGE_VOICE_GENDER, voiceGender); }, [voiceGender]);
+  useEffect(() => { saveJson(STORAGE_THEME, themeMode); }, [themeMode]);
+  useEffect(() => { saveJson(STORAGE_FONT_SIZE, fontSizeMode); }, [fontSizeMode]);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", themeMode === "dark");
+  }, [themeMode]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -241,7 +264,7 @@ function App() {
   // ── send message ──────────────────────────────────────────────────────────
   async function handleSend(event?: FormEvent) {
     event?.preventDefault();
-    const text = message.trim();
+    const text = message.trim() || userInfo.problem_summary?.trim() || "";
     if (!text || !isIndexed || loading) return;
 
     // Abort any in-flight stream.
@@ -333,6 +356,10 @@ function App() {
     setLiveSteps(emptySteps);
   }
 
+  function clearPatientData() {
+    setUserInfo(defaultUser);
+  }
+
   async function copyHistory() {
     const transcript = messages
       .map((item) => `${item.role === "user" ? "Uživatel" : "Asistent"}: ${item.content}`)
@@ -341,16 +368,17 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-mist text-ink">
-      <header className="border-b border-slate-200 bg-white">
+    <div className={`app-shell min-h-screen bg-mist text-ink transition-colors dark:bg-slate-950 dark:text-slate-100 ${fontScaleClass}`}>
+      <header className="app-header sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-md bg-mint text-white">
-              <Bot size={24} />
+            <div className="logo-mark">
+              <Stethoscope size={23} />
+              <span className="text-[11px] font-black tracking-wide">XD</span>
             </div>
             <div>
               <h1 className="text-xl font-semibold">XDENT AI Support</h1>
-              <p className="text-sm text-slate-500">RAG operátor pro první úroveň podpory</p>
+              <p className="text-sm text-slate-500">Profesionální triáž podpory nad transkripcemi</p>
             </div>
           </div>
 
@@ -363,6 +391,12 @@ function App() {
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill icon={<Database size={16} />} label={isIndexed ? `${stats?.points_count} chunků` : "Index prázdný"} ok={isIndexed} />
             <StatusPill icon={<Sparkles size={16} />} label={stats?.api_ready ? "OpenAI ready" : "Chybí klíč"} ok={Boolean(stats?.api_ready)} />
+            <AppearanceControls
+              themeMode={themeMode}
+              fontSizeMode={fontSizeMode}
+              onThemeModeChange={setThemeMode}
+              onFontSizeModeChange={setFontSizeMode}
+            />
             <button className="icon-button" onClick={() => { void refreshStats(); void refreshCacheStats(); }} title="Obnovit stav">
               <RefreshCw size={18} />
             </button>
@@ -379,7 +413,7 @@ function App() {
           <section className="space-y-5">
             <IndexBanner stats={stats} isIndexed={isIndexed} indexing={indexing} />
 
-            <section className="panel flex min-h-[560px] flex-col">
+            <section className="panel flex h-[720px] min-h-0 flex-col xl:h-[calc(100vh-178px)] xl:max-h-[840px]">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <PanelTitle icon={<MessageSquare size={19} />} title="Konverzace" subtitle={`${messages.length} zpráv v relaci`} />
                 <div className="flex items-center gap-2">
@@ -400,7 +434,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="thin-scroll flex-1 space-y-4 overflow-y-auto pr-1">
+              <div className="thin-scroll min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                 {messages.length === 0 && <WelcomeBlock voiceOutputEnabled={voiceOutputEnabled} />}
                 {messages.map((item) => (
                   <ChatBubble key={item.id} message={item} />
@@ -429,7 +463,7 @@ function App() {
                         void handleSend();
                       }
                     }}
-                    placeholder="Dotaz zákazníka… (Ctrl+Enter odešle)"
+                    placeholder="Detail dotazu nebo doplnění k problému pacienta… (Ctrl+Enter odešle)"
                     maxLength={4000}
                   />
                   <span className="pointer-events-none absolute bottom-2 right-3 text-xs text-slate-400">
@@ -455,7 +489,7 @@ function App() {
                   <button
                     className="primary-button h-auto min-h-12 md:w-40"
                     type="submit"
-                    disabled={loading || !isIndexed || !message.trim()}
+                    disabled={loading || !isIndexed || !(message.trim() || userInfo.problem_summary?.trim())}
                   >
                     {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
                     Odeslat
@@ -475,7 +509,7 @@ function App() {
           </section>
 
           <aside className="space-y-5">
-            <UserPanel userInfo={userInfo} onChange={setUserInfo} />
+            <PatientPanel userInfo={userInfo} onChange={setUserInfo} onClear={clearPatientData} />
             <RetrievalPanel
               strictMode={strictMode}
               onStrictModeChange={setStrictMode}
@@ -504,7 +538,7 @@ function App() {
       )}
 
       {activeTab === "history" && (
-        <HistoryView messages={messages} onClear={clearHistory} onCopy={copyHistory} sessionCost={sessionCost} sessionId={sessionId} />
+        <HistoryView messages={messages} onClear={clearHistory} onCopy={copyHistory} sessionId={sessionId} />
       )}
 
       {activeTab === "price" && (
@@ -563,7 +597,7 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
   return (
     <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-5">
       <div className="mb-2 flex items-center gap-2 font-semibold">
-        <Bot size={18} />
+        <Stethoscope size={18} />
         Připraveno na dotaz
       </div>
       <p className="text-sm leading-6 text-slate-600">
@@ -576,7 +610,6 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
 
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
-  const usage = message.response?.usage;
   const [copied, setCopied] = useState(false);
 
   async function copyContent() {
@@ -606,7 +639,6 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
             <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">jistota {Math.round(message.response.confidence * 100)} %</span>
             <SourceDisclosure sources={message.response.sources} />
-            {usage && <span className="rounded-md bg-white/70 px-2 py-1 text-slate-600">{formatUsd(usage.total_estimated_cost_usd)}</span>}
           </div>
         )}
       </div>
@@ -655,20 +687,58 @@ function PendingBubble({ steps }: { steps: AgentStep[] }) {
   );
 }
 
-function UserPanel({ userInfo, onChange }: { userInfo: UserInfo; onChange: (value: UserInfo) => void }) {
+function PatientPanel({
+  userInfo,
+  onChange,
+  onClear
+}: {
+  userInfo: UserInfo;
+  onChange: (value: UserInfo) => void;
+  onClear: () => void;
+}) {
   function update(field: keyof UserInfo, value: string) {
     onChange({ ...userInfo, [field]: value });
   }
 
   return (
     <section className="panel">
-      <PanelTitle icon={<User size={19} />} title="Uživatel" subtitle="Kontext pro odpověď" />
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <PanelTitle icon={<User size={19} />} title="Pacient / případ" subtitle="Ukládá se lokálně v prohlížeči" />
+        <button className="icon-button h-9 w-9" onClick={onClear} title="Vymazat data pacienta">
+          <Trash2 size={16} />
+        </button>
+      </div>
       <div className="grid gap-3">
-        <Input label="Jméno" value={userInfo.name ?? ""} onChange={(value) => update("name", value)} />
-        <Input label="Ordinace" value={userInfo.clinic ?? ""} onChange={(value) => update("clinic", value)} />
-        <Input label="Role" value={userInfo.role ?? ""} onChange={(value) => update("role", value)} />
-        <Input label="Verze XDENT" value={userInfo.software_version ?? ""} onChange={(value) => update("software_version", value)} />
-        <Input label="Kontakt" value={userInfo.contact ?? ""} onChange={(value) => update("contact", value)} />
+        <Input label="Pacient" value={userInfo.patient_name ?? ""} onChange={(value) => update("patient_name", value)} />
+        <Input label="Číslo karty / ID" value={userInfo.patient_identifier ?? ""} onChange={(value) => update("patient_identifier", value)} />
+        <Input label="Věk / rok narození" value={userInfo.patient_age ?? ""} onChange={(value) => update("patient_age", value)} />
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Urgence</span>
+          <select className="field-input h-10" value={userInfo.urgency ?? "normal"} onChange={(event) => update("urgency", event.target.value)}>
+            <option value="low">Nízká</option>
+            <option value="normal">Běžná</option>
+            <option value="high">Vysoká</option>
+            <option value="critical">Kritická</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Konkrétní problém</span>
+          <textarea
+            className="field-input min-h-24 resize-none"
+            value={userInfo.problem_summary ?? ""}
+            onChange={(event) => update("problem_summary", event.target.value)}
+            placeholder="Např. u pacienta nejde vystavit ePoukaz, systém hlásí chybu úhrady..."
+            maxLength={1200}
+          />
+        </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <Input label="Ordinace" value={userInfo.clinic ?? ""} onChange={(value) => update("clinic", value)} />
+          <Input label="Kontakt" value={userInfo.contact ?? ""} onChange={(value) => update("contact", value)} />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <Input label="Operátor" value={userInfo.name ?? ""} onChange={(value) => update("name", value)} />
+          <Input label="Verze XDENT" value={userInfo.software_version ?? ""} onChange={(value) => update("software_version", value)} />
+        </div>
       </div>
     </section>
   );
@@ -918,13 +988,11 @@ function HistoryView({
   messages,
   onClear,
   onCopy,
-  sessionCost,
   sessionId
 }: {
   messages: ChatMessage[];
   onClear: () => void;
   onCopy: () => void;
-  sessionCost: number;
   sessionId: string;
 }) {
   const answered = messages.filter((item) => item.role === "assistant" && item.response).length;
@@ -946,7 +1014,7 @@ function HistoryView({
         <div className="mb-5 grid gap-3 md:grid-cols-3">
           <Metric label="Zprávy" value={`${messages.length}`} />
           <Metric label="Odpovědi" value={`${answered}`} />
-          <Metric label="Odhad relace" value={formatUsd(sessionCost)} />
+          <Metric label="Zdroje" value={`${messages.reduce((sum, item) => sum + (item.response?.sources.length ?? 0), 0)}`} />
         </div>
 
         <div className="space-y-3">
@@ -962,7 +1030,6 @@ function HistoryView({
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   <SourceDisclosure sources={item.response.sources} />
                   <span className="rounded-md bg-slate-100 px-2 py-1">tolerance: {toleranceName(item.response.retrieval_tolerance)}</span>
-                  <span className="rounded-md bg-slate-100 px-2 py-1">cena: {formatUsd(item.response.usage?.total_estimated_cost_usd ?? 0)}</span>
                 </div>
               )}
             </article>
@@ -1161,6 +1228,55 @@ function PriceCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function AppearanceControls({
+  themeMode,
+  fontSizeMode,
+  onThemeModeChange,
+  onFontSizeModeChange
+}: {
+  themeMode: ThemeMode;
+  fontSizeMode: FontSizeMode;
+  onThemeModeChange: (value: ThemeMode) => void;
+  onFontSizeModeChange: (value: FontSizeMode) => void;
+}) {
+  const fontModes: FontSizeMode[] = ["normal", "large", "xlarge"];
+  const currentIndex = fontModes.indexOf(fontSizeMode);
+
+  return (
+    <div className="appearance-controls">
+      <button
+        className="icon-button"
+        onClick={() => onThemeModeChange(themeMode === "dark" ? "light" : "dark")}
+        title={themeMode === "dark" ? "Přepnout na světlý režim" : "Přepnout na tmavý režim"}
+      >
+        {themeMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
+      <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1">
+        <Type size={16} className="mx-1 text-slate-500" />
+        <button
+          className="icon-button h-8 w-8"
+          onClick={() => onFontSizeModeChange(fontModes[Math.max(0, currentIndex - 1)])}
+          title="Zmenšit písmo"
+          disabled={currentIndex === 0}
+        >
+          <Minus size={15} />
+        </button>
+        <span className="min-w-12 text-center text-xs font-semibold text-slate-500">
+          {fontSizeMode === "normal" ? "100%" : fontSizeMode === "large" ? "115%" : "130%"}
+        </span>
+        <button
+          className="icon-button h-8 w-8"
+          onClick={() => onFontSizeModeChange(fontModes[Math.min(fontModes.length - 1, currentIndex + 1)])}
+          title="Zvětšit písmo"
+          disabled={currentIndex === fontModes.length - 1}
+        >
+          <Plus size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function StatusPill({ icon, label, ok }: { icon: ReactNode; label: string; ok: boolean }) {
   return (
     <div className={`status-pill ${ok ? "border-mint/30 bg-mint/10 text-mint" : "border-amber/30 bg-amber/10 text-amber"}`}>
@@ -1252,12 +1368,24 @@ function EmptyState({ text }: { text: string }) {
 // ── utils ──────────────────────────────────────────────────────────────────
 
 function compactUser(user: UserInfo): UserInfo | null {
+  const hasCaseData = Boolean(
+    trimOrUndefined(user.patient_name) ||
+    trimOrUndefined(user.patient_identifier) ||
+    trimOrUndefined(user.patient_age) ||
+    trimOrUndefined(user.problem_summary) ||
+    (user.urgency && user.urgency !== "normal")
+  );
   const compacted: UserInfo = {
     name: trimOrUndefined(user.name),
     clinic: trimOrUndefined(user.clinic),
     role: trimOrUndefined(user.role),
     software_version: trimOrUndefined(user.software_version),
-    contact: trimOrUndefined(user.contact)
+    contact: trimOrUndefined(user.contact),
+    patient_name: trimOrUndefined(user.patient_name),
+    patient_identifier: trimOrUndefined(user.patient_identifier),
+    patient_age: trimOrUndefined(user.patient_age),
+    urgency: hasCaseData ? (user.urgency ?? "normal") : undefined,
+    problem_summary: trimOrUndefined(user.problem_summary)
   };
   return Object.values(compacted).some(Boolean) ? compacted : null;
 }

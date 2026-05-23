@@ -45,6 +45,7 @@ Použij pouze dodané zdroje z transkripcí.
 Zdroje jsou seřazené podle relevance; odpověď stav hlavně na prvních zdrojích.
 Nesmíš míchat nesouvisející úryvky. Pokud zdroj popisuje jiný problém, ignoruj ho.
 Dej konkrétní postup jen tehdy, když je ve zdrojích opravdu uvedený.
+Urgenci pacienta použij jen pro doporučení priority dalšího postupu, ne pro vymýšlení neověřených řešení.
 Pokud zdroje nestačí, řekni to a doporuč eskalaci na podporu.
 Na konec uveď krátký řádek `Zdroj: ...` a použij přesný název zdroje z kontextu, ne pouze číslo v hranaté závorce.
 Nevymýšlej postupy mimo kontext."""
@@ -86,7 +87,8 @@ class SupportAgent:
         # ── cache lookup ──────────────────────────────────────────────────────
         cache = get_agent_cache(self.settings)
         cache_key, normalized_query = cache.build_key(message, strict_mode, retrieval_tolerance, top_k)
-        cached = cache.get(cache_key)
+        can_use_cache = not self._has_case_context(user)
+        cached = cache.get(cache_key) if can_use_cache else None
         if cached is not None:
             return cached.model_copy(update={"session_id": session_id, "user": user})
 
@@ -212,7 +214,8 @@ class SupportAgent:
         self._log(message, response)
 
         # ── cache the result (keyed without session/user) ─────────────────────
-        cache.put(cache_key, normalized_query, response)
+        if can_use_cache:
+            cache.put(cache_key, normalized_query, response)
 
         return response
 
@@ -291,14 +294,42 @@ class SupportAgent:
         if not user:
             return "neuvedeno"
         parts = [
-            ("jméno", user.name),
+            ("operátor", user.name),
             ("ordinace", user.clinic),
             ("role", user.role),
             ("verze XDENT", user.software_version),
             ("kontakt", user.contact),
+            ("pacient", user.patient_name),
+            ("ID pacienta/karta", user.patient_identifier),
+            ("věk pacienta", user.patient_age),
+            ("urgence", self._urgency_label(user.urgency)),
+            ("konkrétní problém", user.problem_summary),
         ]
         filled = [f"{label}: {value}" for label, value in parts if value]
         return "; ".join(filled) if filled else "neuvedeno"
+
+    def _has_case_context(self, user: UserInfo | None) -> bool:
+        if not user:
+            return False
+        return any(
+            bool(value)
+            for value in (
+                user.patient_name,
+                user.patient_identifier,
+                user.patient_age,
+                user.urgency,
+                user.problem_summary,
+            )
+        )
+
+    def _urgency_label(self, urgency: str | None) -> str | None:
+        labels = {
+            "low": "nízká",
+            "normal": "běžná",
+            "high": "vysoká",
+            "critical": "kritická",
+        }
+        return labels.get(urgency or "")
 
     def _min_score(self, strict_mode: bool, retrieval_tolerance: str) -> float:
         if strict_mode or retrieval_tolerance == "strict":

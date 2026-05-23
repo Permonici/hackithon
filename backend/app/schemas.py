@@ -11,6 +11,11 @@ class UserInfo(BaseModel):
     role: str | None = Field(default=None, max_length=120)
     software_version: str | None = Field(default=None, max_length=80)
     contact: str | None = Field(default=None, max_length=160)
+    patient_name: str | None = Field(default=None, max_length=120)
+    patient_identifier: str | None = Field(default=None, max_length=120)
+    patient_age: str | None = Field(default=None, max_length=40)
+    urgency: Literal["low", "normal", "high", "critical"] | None = None
+    problem_summary: str | None = Field(default=None, max_length=1200)
 
 
 class ChatRequest(BaseModel):

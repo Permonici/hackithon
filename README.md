@@ -17,6 +17,8 @@ AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení fu
 - Chat history, uživatelský kontext a price info panel ve frontendu.
 - Hlasový vstup přes mikrofon a volitelné přečtení odpovědi v mužském nebo ženském hlasu.
 - Rozklikávací seznam konkrétních zdrojů přímo u odpovědi v chatu.
+- Pacientský formulář s urgencí, konkrétním problémem a lokálním uložením v prohlížeči.
+- Light/dark mode a zvětšení písma pro lepší prezentaci i přístupnost.
 - JSONL log interakcí pro vyhodnocení kvality.
 - Offline fallback skripty bez Dockeru a bez API klíče.
 
@@ -58,7 +60,7 @@ http://localhost:8080
 
 1. Otevřete `http://localhost:8080`.
 2. Pokud je index prázdný, klikněte na `Indexovat`.
-3. V záložce `Chat` doplňte volitelné údaje o uživateli, vyberte toleranci hledání a odešlete dotaz.
+3. V záložce `Chat` doplňte pacienta/případ, urgenci, konkrétní problém, vyberte toleranci hledání a odešlete dotaz.
 4. V konverzaci sledujte odpověď, zdroje z transkripcí, téma a jistotu.
 5. Záložka `Historie` drží lokální chat history pro demo a zpětné vyhodnocení.
 6. Záložka `Cena` ukazuje orientační náklad poslední odpovědi i celé relace.

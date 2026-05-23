@@ -6,6 +6,11 @@ export type UserInfo = {
   role?: string | null;
   software_version?: string | null;
   contact?: string | null;
+  patient_name?: string | null;
+  patient_identifier?: string | null;
+  patient_age?: string | null;
+  urgency?: "low" | "normal" | "high" | "critical" | null;
+  problem_summary?: string | null;
 };
 
 export type AgentStep = {

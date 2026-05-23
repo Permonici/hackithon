@@ -6,7 +6,9 @@ React + Tailwind konzole pro demonstraci XDENT asistenta.
 
 - chat pro dotazy zákazníků,
 - lokální chat history,
-- panel s uživatelským kontextem,
+- pacientský formulář s urgencí a konkrétním problémem,
+- lokální uložení dat pacienta v prohlížeči,
+- light/dark mode a zvětšení písma,
 - price info tab s orientačním nákladem,
 - režimy tolerance hledání v chuncích,
 - hlasový vstup přes mikrofon,
