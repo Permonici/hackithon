@@ -42,6 +42,11 @@ def get_qdrant_client(url: str) -> QdrantClient:
     return QdrantClient(url=url)
 
 
+@lru_cache(maxsize=2)
+def make_sparse_embedding(model_name: str) -> FastEmbedSparse:
+    return FastEmbedSparse(model_name=model_name)
+
+
 def _embeddings(settings: Settings) -> OpenAIEmbeddings:
     return make_embeddings(
         settings.openai_embedding_model,
@@ -53,7 +58,7 @@ def _embeddings(settings: Settings) -> OpenAIEmbeddings:
 def build_vector_store(settings: Settings) -> QdrantVectorStore:
     return QdrantVectorStore.from_existing_collection(
         embedding=_embeddings(settings),
-        sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
+        sparse_embedding=make_sparse_embedding("Qdrant/bm25"),
         retrieval_mode=RetrievalMode.HYBRID,
         collection_name=settings.qdrant_collection,
         url=settings.qdrant_url,
@@ -105,7 +110,7 @@ def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestRe
     QdrantVectorStore.from_documents(
         documents,
         embedding=_embeddings(settings),
-        sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
+        sparse_embedding=make_sparse_embedding("Qdrant/bm25"),
         retrieval_mode=RetrievalMode.HYBRID,
         ids=ids,
         collection_name=settings.qdrant_collection,

@@ -197,26 +197,15 @@ body {
     @apply h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold normal-case tracking-normal text-ink outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20;
   }
 
-  .memory-strip {
-    @apply border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600;
-  }
-
-  .memory-strip summary {
-    @apply flex cursor-pointer list-none items-center gap-2 font-semibold;
-  }
-
-  .memory-strip summary > span:last-of-type,
   .quick-strip summary > span:last-of-type {
     @apply ml-auto;
   }
 
-  .memory-strip summary::after,
   .quick-strip summary::after {
     content: "+";
     @apply inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-sm font-black text-slate-500;
   }
 
-  .memory-strip[open] summary::after,
   .quick-strip[open] summary::after {
     content: "-";
   }
@@ -241,8 +230,12 @@ body {
     @apply mt-2 grid gap-2;
   }
 
-  .quick-font-row {
+  .quick-tool-row {
     @apply flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2;
+  }
+
+  .quick-section-title {
+    @apply text-[11px] font-bold uppercase tracking-wide text-slate-400;
   }
 
   .quick-question-grid {
@@ -258,7 +251,7 @@ body {
   }
 
   .quick-action {
-    @apply shrink-0 rounded-md border border-mint/25 bg-mint/10 px-3 py-2 text-xs font-semibold text-mint transition hover:bg-mint hover:text-white;
+    @apply shrink-0 rounded-md border border-mint/25 bg-mint/10 px-3 py-2 text-xs font-semibold text-mint transition hover:bg-mint hover:text-white disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400;
   }
 
   .xdent-chat-input {
@@ -447,17 +440,15 @@ body {
 .dark .quick-strip,
 .dark .agent-handoff-wrap,
 .dark .agent-handoff-compact,
-.dark .agent-handoff-expanded,
-.dark .memory-strip {
+.dark .agent-handoff-expanded {
   background: #111827;
   border-color: #263247;
 }
 
 .dark .agent-handoff-toggle,
 .dark .agent-preset,
-.dark .quick-font-row,
+.dark .quick-tool-row,
 .dark .font-size-button,
-.dark .memory-strip summary::after,
 .dark .quick-strip summary::after {
   background: #0f172a;
   border-color: #334155;

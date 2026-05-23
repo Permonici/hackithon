@@ -119,6 +119,7 @@ function App() {
   const frequentQuestions = useMemo(() => mergeFrequentQuestions(cacheStats?.top_frequent.map((item) => item.query) ?? [], samples), [cacheStats, samples]);
   const latestActions = savedResponse?.next_actions ?? [];
   const latestEscalation = savedResponse?.escalation_packet ?? null;
+  const visibleActions = useMemo(() => latestActions.filter((action) => !isCopyEscalationAction(action)), [latestActions]);
 
   useEffect(() => {
     void refreshStats();
@@ -360,7 +361,6 @@ function App() {
           </div>
 
           <AgentSwitcher selected={agentMode} onSelect={chooseAgent} />
-          <PatientMemoryStrip memory={patientMemory} updates={savedResponse?.memory_updates ?? []} onForget={clearPatientMemory} />
 
           {!isIndexed && (
             <div className="mx-4 mt-3 rounded-md border border-amber/30 bg-amber/10 p-3 text-sm text-amber">
@@ -386,9 +386,9 @@ function App() {
             </div>
           )}
 
-          {latestActions.length > 0 && (
+          {visibleActions.length > 0 && (
             <div className="xdent-chat-actions">
-              {latestActions.map((action) => (
+              {visibleActions.map((action) => (
                 <button key={action} className="quick-action" type="button" onClick={() => { void handleNextAction(action); }}>
                   {action}
                 </button>
@@ -399,8 +399,12 @@ function App() {
           <QuickQuestionsStrip
             questions={frequentQuestions}
             fontScale={fontScale}
+            memory={patientMemory}
+            memoryUpdates={savedResponse?.memory_updates ?? []}
+            escalationPacket={latestEscalation}
             onPickQuestion={setMessage}
             onCycleFont={() => setFontScale((current) => nextFontScale(current))}
+            onForgetMemory={clearPatientMemory}
           />
 
           <form className="xdent-chat-input" onSubmit={handleSend}>
@@ -541,45 +545,52 @@ function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: 
   );
 }
 
-function PatientMemoryStrip({ memory, updates, onForget }: { memory: UserInfo | null; updates: string[]; onForget: () => void }) {
-  const chips = memoryChips(memory);
-  const summary = updates.length ? `ulozeno: ${updates.join(", ")}` : chips.length ? `${chips.length} udaje` : "zatim prazdna";
-
-  return (
-    <details className="memory-strip">
-      <summary>
-        <span>Pamet pacienta</span>
-        <span className="text-slate-400">{summary}</span>
-      </summary>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {chips.length > 0
-          ? chips.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
-          : <span className="text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
-        {chips.length > 0 && <button className="memory-forget" type="button" onClick={onForget}>Zapomenout udaje</button>}
-      </div>
-    </details>
-  );
-}
-
 function QuickQuestionsStrip({
   questions,
   fontScale,
+  memory,
+  memoryUpdates,
+  escalationPacket,
   onPickQuestion,
   onCycleFont,
+  onForgetMemory,
 }: {
   questions: string[];
   fontScale: FontScale;
+  memory: UserInfo | null;
+  memoryUpdates: string[];
+  escalationPacket: string | null;
   onPickQuestion: (question: string) => void;
   onCycleFont: () => void;
+  onForgetMemory: () => void;
 }) {
+  const [copiedEscalation, setCopiedEscalation] = useState(false);
+  const memoryItems = memoryChips(memory);
+  const memorySummary = memoryUpdates.length
+    ? `ulozeno: ${memoryUpdates.join(", ")}`
+    : memoryItems.length
+      ? `${memoryItems.length} udaje`
+      : "zatim prazdna";
+
+  useEffect(() => {
+    setCopiedEscalation(false);
+  }, [escalationPacket]);
+
+  async function copyEscalation() {
+    if (!escalationPacket) return;
+    await navigator.clipboard?.writeText(escalationPacket);
+    setCopiedEscalation(true);
+    setTimeout(() => setCopiedEscalation(false), 1400);
+  }
+
   return (
     <details className="quick-strip">
       <summary>
-        <span>Časté dotazy</span>
-        <span className="text-slate-400">{questions.length} rychlych voleb</span>
+        <span>Rychle volby</span>
+        <span className="text-slate-400">dotazy, pamet, eskalace</span>
       </summary>
       <div className="quick-strip-content">
-        <div className="quick-font-row">
+        <div className="quick-tool-row">
           <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
           <button
             className="font-size-button font-size-button-a"
@@ -591,6 +602,40 @@ function QuickQuestionsStrip({
             A
           </button>
         </div>
+
+        <div className="quick-tool-row">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
+            <div className="truncate text-xs text-slate-500">{memorySummary}</div>
+          </div>
+          {memoryItems.length > 0 && (
+            <button className="memory-forget" type="button" onClick={onForgetMemory}>
+              Zapomenout
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {memoryItems.length > 0
+            ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
+            : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
+        </div>
+
+        <div className="quick-tool-row">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-ink">Eskalace</div>
+            <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
+          </div>
+          <button
+            className="quick-action"
+            type="button"
+            onClick={() => { void copyEscalation(); }}
+            disabled={!escalationPacket}
+          >
+            {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
+          </button>
+        </div>
+
+        <div className="quick-section-title">Caste dotazy</div>
         <div className="quick-question-grid">
           {questions.map((question) => (
             <button key={question} className="sample-chip" type="button" onClick={() => onPickQuestion(question)}>
@@ -821,6 +866,10 @@ function promptForAction(action: string, memory: UserInfo | null): string {
   if (lowered.includes("2. urovni")) return "Predat 2. urovni podpory: ";
   if (lowered.includes("zavolat")) return "Chci kontakt na nejvhodnejsi ordinaci pro akutni pripad.";
   return action;
+}
+
+function isCopyEscalationAction(action: string): boolean {
+  return action.toLowerCase().includes("kopirovat") && action.toLowerCase().includes("eskalaci");
 }
 
 function mergeFrequentQuestions(frequent: string[], samples: string[]): string[] {
