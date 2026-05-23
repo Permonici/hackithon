@@ -1,4 +1,4 @@
-# XDENT AI Support Assistant
+# XDENT Recepce
 
 AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení funguje jako 1. úroveň podpory: přijme dotaz, rozpozná téma, vyhledá relevantní části anonymizovaných transkripcí, odpoví stručně a při nejistotě připraví eskalaci.
 
@@ -14,10 +14,13 @@ AI asistent pro zákaznický chat stomatologického softwaru XDENT. Řešení fu
 - Zdroje odpovědi přímo z transkripcí.
 - Strict mode a bezpečný fallback.
 - Tolerantní režimy retrievalu: přesné, vyvážené a širší hledání v chuncích.
-- Chat history, uživatelský kontext a price info panel ve frontendu.
+- Chat history, uživatelský kontext a čisté pacientské workflow bez cenového panelu.
 - Hlasový vstup přes mikrofon a volitelné přečtení odpovědi v mužském nebo ženském hlasu.
 - Rozklikávací seznam konkrétních zdrojů přímo u odpovědi v chatu.
 - Pacientský formulář s urgencí, konkrétním problémem a lokálním uložením v prohlížeči.
+- Pacientský agent s textovým zadáním, doporučením nejdřívějších termínů, předrezervací a eskalací.
+- Malá mapa demo ordinací včetně dentální hygieny a informace, zda nabírají nové pacienty.
+- Spodní workflow lišta: nejčastější dotazy, předobjednání, kontakty a eskalace.
 - Light/dark mode a zvětšení písma pro lepší prezentaci i přístupnost.
 - JSONL log interakcí pro vyhodnocení kvality.
 - Offline fallback skripty bez Dockeru a bez API klíče.
@@ -109,7 +112,7 @@ http://localhost:6333/dashboard
 ## Demo scénář pro porotu
 
 1. Otevřete `http://localhost:8080`.
-2. Zkontrolujte stav `OpenAI ready` a počet chunků.
+2. Zkontrolujte stav `Model ready` a počet chunků.
 3. Vyberte ukázkový dotaz na ePoukaz.
 4. Ukažte, že agent projde kroky:
    - rozpoznání tématu,
@@ -140,7 +143,7 @@ Detailní popis je v [ARCHITEKTURA.md](ARCHITEKTURA.md).
 
 - `GET /health` - kontrola backendu
 - `GET /api/stats` - statistiky indexu a témat
-- `GET /api/pricing` - konfigurace modelů a orientačních cen
+- `GET /api/clinics` - demo adresář ordinací a dentální hygieny pro pacientského agenta
 - `POST /api/ingest` - načtení a indexace transkripcí
 - `POST /api/chat` - chat odpověď
 - `POST /api/chat/stream` - stream pro realtime frontend

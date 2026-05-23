@@ -1,4 +1,4 @@
-import type { AgentStep, CacheStats, ChatRequestPayload, ChatResponse, StatsResponse } from "./types";
+import type { AgentStep, CacheStats, ChatRequestPayload, ChatResponse, ClinicOption, StatsResponse } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
@@ -6,6 +6,14 @@ export async function fetchStats(): Promise<StatsResponse> {
   const response = await fetch(`${API_URL}/stats`);
   if (!response.ok) {
     throw new Error("Statistiky se nepodarilo nacist.");
+  }
+  return response.json();
+}
+
+export async function fetchClinics(): Promise<ClinicOption[]> {
+  const response = await fetch(`${API_URL}/clinics`);
+  if (!response.ok) {
+    throw new Error("Ordinace se nepodarilo nacist.");
   }
   return response.json();
 }

@@ -20,6 +20,9 @@ class ClinicRecord:
     phone: str
     email: str
     accepting_new_patients: bool
+    services: tuple[str, ...]
+    map_x: float
+    map_y: float
     note: str
     urgent_delay_hours: int
     normal_delay_days: int
@@ -33,6 +36,9 @@ CLINICS: tuple[ClinicRecord, ...] = (
         phone="+420 222 010 101",
         email="praha-karlin@xdent-demo.cz",
         accepting_new_patients=True,
+        services=("zubni ordinace", "dentalni hygiena"),
+        map_x=46,
+        map_y=35,
         note="Prijima nove pacienty, akutni sloty drzi kazdy vsedni den.",
         urgent_delay_hours=3,
         normal_delay_days=2,
@@ -44,6 +50,9 @@ CLINICS: tuple[ClinicRecord, ...] = (
         phone="+420 222 010 202",
         email="praha-chodov@xdent-demo.cz",
         accepting_new_patients=False,
+        services=("zubni ordinace",),
+        map_x=48,
+        map_y=42,
         note="Aktualne bere jen akutni pacienty po telefonickem potvrzeni.",
         urgent_delay_hours=5,
         normal_delay_days=8,
@@ -55,6 +64,9 @@ CLINICS: tuple[ClinicRecord, ...] = (
         phone="+420 475 010 303",
         email="usti@xdent-demo.cz",
         accepting_new_patients=True,
+        services=("zubni ordinace", "dentalni hygiena"),
+        map_x=44,
+        map_y=25,
         note="Prijima nove pacienty a ma navaznost na recepci ordinace.",
         urgent_delay_hours=4,
         normal_delay_days=3,
@@ -66,6 +78,9 @@ CLINICS: tuple[ClinicRecord, ...] = (
         phone="+420 542 010 404",
         email="brno@xdent-demo.cz",
         accepting_new_patients=True,
+        services=("zubni ordinace", "dentalni hygiena"),
+        map_x=58,
+        map_y=64,
         note="Prijima nove pacienty, vhodne pro bezne i urgentni objednani.",
         urgent_delay_hours=6,
         normal_delay_days=4,
@@ -77,6 +92,9 @@ CLINICS: tuple[ClinicRecord, ...] = (
         phone="+420 377 010 505",
         email="plzen@xdent-demo.cz",
         accepting_new_patients=True,
+        services=("zubni ordinace",),
+        map_x=31,
+        map_y=55,
         note="Prijima nove pacienty, nejrychlejsi sloty jsou dopoledne.",
         urgent_delay_hours=7,
         normal_delay_days=5,
@@ -88,9 +106,40 @@ CLINICS: tuple[ClinicRecord, ...] = (
         phone="+420 596 010 606",
         email="ostrava@xdent-demo.cz",
         accepting_new_patients=True,
+        services=("zubni ordinace", "dentalni hygiena"),
+        map_x=82,
+        map_y=52,
         note="Prijima nove pacienty, akutni pripady overuje recepce.",
         urgent_delay_hours=8,
         normal_delay_days=4,
+    ),
+    ClinicRecord(
+        name="XDENT Hygiene Praha - Letna",
+        city="Praha",
+        address="Milady Horakove 31, Praha 7",
+        phone="+420 222 010 707",
+        email="hygiena-praha@xdent-demo.cz",
+        accepting_new_patients=True,
+        services=("dentalni hygiena",),
+        map_x=45,
+        map_y=32,
+        note="Dentalni hygiena prijima nove pacienty, vhodne pro preventivni navstevy.",
+        urgent_delay_hours=24,
+        normal_delay_days=1,
+    ),
+    ClinicRecord(
+        name="XDENT Hygiene Brno - Veveri",
+        city="Brno",
+        address="Veveri 24, Brno",
+        phone="+420 542 010 808",
+        email="hygiena-brno@xdent-demo.cz",
+        accepting_new_patients=True,
+        services=("dentalni hygiena",),
+        map_x=57,
+        map_y=62,
+        note="Dentalni hygiena prijima nove pacienty a umi rychle preventivni terminy.",
+        urgent_delay_hours=24,
+        normal_delay_days=2,
     ),
 )
 
@@ -176,15 +225,26 @@ def assess_urgency(message: str, user: UserInfo | None) -> TriageResult:
     )
 
 
-def find_nearby_clinics(city: str | None, urgency: str = "normal", limit: int = 3) -> list[ClinicOption]:
+def list_clinics(urgency: str = "normal") -> list[ClinicOption]:
+    return [_clinic_option(clinic, urgency, None) for clinic in CLINICS]
+
+
+def find_nearby_clinics(
+    city: str | None,
+    urgency: str = "normal",
+    limit: int = 5,
+    service_query: str | None = None,
+) -> list[ClinicOption]:
     origin = _coords_for(city)
+    service_text = _normalize(service_query or "")
     ranked: list[tuple[float, ClinicRecord, float | None]] = []
     for clinic in CLINICS:
         distance = _distance_km(origin, _coords_for(clinic.city)) if origin else None
         city_bonus = 0 if _same_city(city, clinic.city) else 35
         accepting_bonus = 0 if clinic.accepting_new_patients else 25
+        service_bonus = _service_bonus(clinic, service_text)
         distance_rank = distance if distance is not None else 80
-        ranked.append((distance_rank + city_bonus + accepting_bonus, clinic, distance))
+        ranked.append((distance_rank + city_bonus + accepting_bonus + service_bonus, clinic, distance))
 
     ranked.sort(key=lambda item: (item[0], not item[1].accepting_new_patients, item[1].name))
     return [
@@ -248,6 +308,9 @@ def _clinic_option(clinic: ClinicRecord, urgency: str, distance: float | None) -
         address=clinic.address,
         distance_km=round(distance, 1) if distance is not None else None,
         accepting_new_patients=clinic.accepting_new_patients,
+        services=list(clinic.services),
+        map_x=clinic.map_x,
+        map_y=clinic.map_y,
         phone=clinic.phone,
         email=clinic.email,
         earliest_slot=_slot_for(clinic, urgency),
@@ -287,6 +350,21 @@ def _best_contact(user: UserInfo | None) -> str | None:
         if value and value.strip():
             return value.strip()
     return None
+
+
+def _service_bonus(clinic: ClinicRecord, service_text: str) -> int:
+    if not service_text:
+        return 0
+    wants_hygiene = any(word in service_text for word in ("hygien", "hygiena", "cisteni", "preventiv"))
+    wants_dentist = any(word in service_text for word in ("zub", "bolest", "kaz", "vypln", "akut", "ordinac"))
+    services = " ".join(clinic.services)
+    if wants_hygiene and "hygiena" in services:
+        return -30
+    if wants_hygiene and "hygiena" not in services:
+        return 25
+    if wants_dentist and "zubni ordinace" in services:
+        return -15
+    return 0
 
 
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:

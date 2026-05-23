@@ -77,6 +77,9 @@ class ClinicOption(BaseModel):
     address: str
     distance_km: float | None = None
     accepting_new_patients: bool
+    services: list[str] = Field(default_factory=list)
+    map_x: float = Field(default=50, ge=0, le=100)
+    map_y: float = Field(default=50, ge=0, le=100)
     phone: str
     email: str
     earliest_slot: str | None = None

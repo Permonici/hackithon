@@ -8,17 +8,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from .agent import SupportAgent, get_agent_cache
+from .clinics import list_clinics
 from .config import get_settings
-from .pricing import resolve_price_info
 from .schemas import (
     CacheStatsResponse,
     ChatRequest,
     ChatResponse,
+    ClinicOption,
     EvalRequest,
     EvalResponse,
     EvalResult,
     IngestResponse,
-    PriceInfoResponse,
     StatsResponse,
 )
 from .topics import topic_catalog
@@ -51,9 +51,9 @@ def stats() -> StatsResponse:
     return get_stats(settings)
 
 
-@app.get(f"{settings.api_prefix}/pricing", response_model=PriceInfoResponse)
-def pricing() -> PriceInfoResponse:
-    return resolve_price_info(settings)
+@app.get(f"{settings.api_prefix}/clinics", response_model=list[ClinicOption])
+def clinics() -> list[ClinicOption]:
+    return list_clinics()
 
 
 @app.post(f"{settings.api_prefix}/ingest", response_model=IngestResponse)

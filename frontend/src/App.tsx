@@ -1,7 +1,9 @@
 import {
   Activity,
   AlertTriangle,
+  Building2,
   CalendarCheck,
+  CalendarPlus,
   CheckCircle2,
   Clock3,
   Copy,
@@ -11,6 +13,7 @@ import {
   History,
   Loader2,
   Mail,
+  Map,
   MapPin,
   MessageSquare,
   Mic,
@@ -21,7 +24,7 @@ import {
   Send,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
+  Star,
   Sun,
   Trash2,
   User,
@@ -30,12 +33,13 @@ import {
   Zap
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCacheStats, fetchStats, ingestData, sendChatStream } from "./api";
+import { fetchCacheStats, fetchClinics, fetchStats, ingestData, sendChatStream } from "./api";
 import type {
   AgentStep,
   CacheStats,
   ChatMessage,
   ChatResponse,
+  ClinicOption,
   RetrievalTolerance,
   Source,
   StatsResponse,
@@ -86,6 +90,7 @@ const STORAGE_TOLERANCE = "xdent.chat.tolerance";
 const STORAGE_SESSION = "xdent.chat.session";
 const STORAGE_VOICE_OUTPUT = "xdent.chat.voiceOutput";
 const STORAGE_VOICE_GENDER = "xdent.chat.voiceGender";
+const STORAGE_VOICE_URI = "xdent.chat.voiceUri";
 const STORAGE_THEME = "xdent.ui.theme";
 const STORAGE_FONT_SIZE = "xdent.ui.fontSize";
 
@@ -110,6 +115,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<ChatResponse | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [clinicDirectory, setClinicDirectory] = useState<ClinicOption[]>([]);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [liveSteps, setLiveSteps] = useState<AgentStep[]>(emptySteps);
 
@@ -121,6 +127,9 @@ function App() {
   );
   const [voiceGender, setVoiceGender] = useState<VoiceGender>(() =>
     loadJson<VoiceGender>(STORAGE_VOICE_GENDER, "female")
+  );
+  const [preferredVoiceURI, setPreferredVoiceURI] = useState(() =>
+    loadJson<string>(STORAGE_VOICE_URI, "")
   );
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -140,6 +149,8 @@ function App() {
   const sources = visibleResponse?.sources ?? sourcesFromSteps(liveSteps);
   const topScore = Math.max(0, ...sources.map((source) => source.score));
   const fontScaleClass = fontSizeMode === "xlarge" ? "font-xlarge" : fontSizeMode === "large" ? "font-large" : "font-normal";
+  const mapClinics = visibleResponse?.clinics?.length ? visibleResponse.clinics : clinicDirectory;
+  const selectedVoice = selectAssistantVoice(ttsVoices, voiceGender, preferredVoiceURI);
 
   const topicCoverage = useMemo(() => {
     const counts = stats?.topics.map((topic) => topic.chunks) ?? [];
@@ -151,13 +162,14 @@ function App() {
   }, [stats]);
 
   // ── effects ───────────────────────────────────────────────────────────────
-  useEffect(() => { refreshStats(); refreshCacheStats(); }, []);
+  useEffect(() => { refreshStats(); refreshClinics(); refreshCacheStats(); }, []);
 
   useEffect(() => { saveJson(STORAGE_MESSAGES, messages); }, [messages]);
   useEffect(() => { saveJson(STORAGE_USER, userInfo); }, [userInfo]);
   useEffect(() => { saveJson(STORAGE_TOLERANCE, retrievalTolerance); }, [retrievalTolerance]);
   useEffect(() => { saveJson(STORAGE_VOICE_OUTPUT, voiceOutputEnabled); }, [voiceOutputEnabled]);
   useEffect(() => { saveJson(STORAGE_VOICE_GENDER, voiceGender); }, [voiceGender]);
+  useEffect(() => { saveJson(STORAGE_VOICE_URI, preferredVoiceURI); }, [preferredVoiceURI]);
   useEffect(() => { saveJson(STORAGE_THEME, themeMode); }, [themeMode]);
   useEffect(() => { saveJson(STORAGE_FONT_SIZE, fontSizeMode); }, [fontSizeMode]);
 
@@ -189,6 +201,10 @@ function App() {
   // ── data fetchers ─────────────────────────────────────────────────────────
   async function refreshStats() {
     try { setStats(await fetchStats()); } catch { setStats(null); }
+  }
+
+  async function refreshClinics() {
+    try { setClinicDirectory(await fetchClinics()); } catch { setClinicDirectory([]); }
   }
 
   async function refreshCacheStats() {
@@ -240,15 +256,14 @@ function App() {
     utterance.rate = voiceGender === "female" ? 1.03 : 0.96;
     utterance.pitch = voiceGender === "female" ? 1.18 : 0.82;
 
-    const czechVoice = selectAssistantVoice(ttsVoices, voiceGender);
-    if (czechVoice) utterance.voice = czechVoice;
+    if (selectedVoice) utterance.voice = selectedVoice;
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
 
     window.speechSynthesis.speak(utterance);
-  }, [voiceOutputEnabled, ttsVoices, voiceGender]);
+  }, [voiceOutputEnabled, selectedVoice, voiceGender]);
 
   function stopSpeaking() {
     window.speechSynthesis?.cancel();
@@ -256,9 +271,7 @@ function App() {
   }
 
   // ── send message ──────────────────────────────────────────────────────────
-  async function handleSend(event?: FormEvent) {
-    event?.preventDefault();
-    const text = message.trim() || userInfo.problem_summary?.trim() || "";
+  async function submitMessage(text: string) {
     if (!text || !isIndexed || loading) return;
 
     // Abort any in-flight stream.
@@ -331,6 +344,17 @@ function App() {
     }
   }
 
+  async function handleSend(event?: FormEvent) {
+    event?.preventDefault();
+    const text = message.trim() || userInfo.problem_summary?.trim() || "";
+    await submitMessage(text);
+  }
+
+  async function handleCareRequest(text: string) {
+    const fallback = buildCarePrompt(userInfo);
+    await submitMessage((text.trim() || fallback).trim());
+  }
+
   async function handleIngest() {
     setIndexing(true);
     setError(null);
@@ -368,8 +392,8 @@ function App() {
           <div className="flex items-center gap-3">
             <XdentLogo />
             <div>
-              <h1 className="text-xl font-semibold">XDENT AI Support</h1>
-              <p className="text-sm text-slate-500">Profesionální triáž podpory nad transkripcemi</p>
+              <h1 className="text-xl font-semibold">XDENT Recepce</h1>
+              <p className="text-sm text-slate-500">Pacientská triáž a operátorský pult nad transkripcemi</p>
             </div>
           </div>
 
@@ -380,7 +404,7 @@ function App() {
 
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill icon={<Database size={16} />} label={isIndexed ? `${stats?.points_count} chunků` : "Index prázdný"} ok={isIndexed} />
-            <StatusPill icon={<Sparkles size={16} />} label={stats?.api_ready ? "OpenAI ready" : "Chybí klíč"} ok={Boolean(stats?.api_ready)} />
+            <StatusPill icon={<ShieldCheck size={16} />} label={stats?.api_ready ? "Model ready" : "Chybí klíč"} ok={Boolean(stats?.api_ready)} />
             <AppearanceControls
               themeMode={themeMode}
               fontSizeMode={fontSizeMode}
@@ -399,11 +423,12 @@ function App() {
       </header>
 
       {activeTab === "chat" && (
-        <main className="mx-auto grid max-w-[1500px] gap-5 px-5 py-5 xl:grid-cols-[minmax(0,1.85fr)_360px]">
+        <>
+        <main className="mx-auto grid max-w-[1600px] gap-5 px-5 py-5 xl:grid-cols-[minmax(0,2.35fr)_340px]">
           <section className="space-y-5">
             <IndexBanner stats={stats} isIndexed={isIndexed} indexing={indexing} />
 
-            <section className="panel flex h-[760px] min-h-0 flex-col xl:h-[calc(100vh-162px)] xl:max-h-[920px]">
+            <section className="panel flex h-[820px] min-h-0 flex-col xl:h-[calc(100vh-142px)] xl:max-h-[980px]">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <PanelTitle icon={<MessageSquare size={19} />} title="Konverzace" subtitle={`${messages.length} zpráv v relaci`} />
                 <div className="flex items-center gap-2">
@@ -511,9 +536,12 @@ function App() {
               voiceOutputSupported={voiceOutputSupported}
               voiceOutputEnabled={voiceOutputEnabled}
               voiceGender={voiceGender}
-              selectedVoiceName={selectAssistantVoice(ttsVoices, voiceGender)?.name ?? null}
+              voices={ttsVoices}
+              selectedVoiceURI={preferredVoiceURI}
+              selectedVoiceName={selectedVoice?.name ?? null}
               onVoiceOutputChange={setVoiceOutputEnabled}
               onVoiceGenderChange={setVoiceGender}
+              onVoiceURIChange={setPreferredVoiceURI}
               isListening={isListening}
               isSpeaking={isSpeaking}
               onStartListening={startListening}
@@ -521,11 +549,25 @@ function App() {
               onStopSpeaking={stopSpeaking}
             />
             <AgentPanel steps={steps} loading={loading} />
-            <CarePanel response={visibleResponse} />
+            <CarePanel
+              response={visibleResponse}
+              userInfo={userInfo}
+              loading={loading}
+              isIndexed={isIndexed}
+              onSubmit={handleCareRequest}
+            />
             <CoveragePanel topicCoverage={topicCoverage} />
             <EscalationPanel response={visibleResponse} />
           </aside>
         </main>
+        <BottomWorkflowBar
+          response={visibleResponse}
+          cacheStats={cacheStats}
+          userInfo={userInfo}
+          onCareSubmit={handleCareRequest}
+        />
+        <ClinicMapSection clinics={mapClinics} response={visibleResponse} />
+        </>
       )}
 
       {activeTab === "history" && (
@@ -593,7 +635,7 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
   return (
     <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-5">
       <div className="mb-2 flex items-center gap-2 font-semibold">
-        <Sparkles size={18} />
+        <CheckCircle2 size={18} />
         Připraveno na dotaz
       </div>
       <p className="text-sm leading-6 text-slate-600">
@@ -806,9 +848,12 @@ function VoicePanel({
   voiceOutputSupported,
   voiceOutputEnabled,
   voiceGender,
+  voices,
+  selectedVoiceURI,
   selectedVoiceName,
   onVoiceOutputChange,
   onVoiceGenderChange,
+  onVoiceURIChange,
   isListening,
   isSpeaking,
   onStartListening,
@@ -819,15 +864,20 @@ function VoicePanel({
   voiceOutputSupported: boolean;
   voiceOutputEnabled: boolean;
   voiceGender: VoiceGender;
+  voices: SpeechSynthesisVoice[];
+  selectedVoiceURI: string;
   selectedVoiceName: string | null;
   onVoiceOutputChange: (v: boolean) => void;
   onVoiceGenderChange: (v: VoiceGender) => void;
+  onVoiceURIChange: (v: string) => void;
   isListening: boolean;
   isSpeaking: boolean;
   onStartListening: () => void;
   onStopListening: () => void;
   onStopSpeaking: () => void;
 }) {
+  const sortedVoices = sortVoices(voices, voiceGender);
+
   return (
     <section className="panel">
       <PanelTitle icon={<Mic size={19} />} title="Hlas" subtitle="Hlasový vstup & výstup (cs-CZ)" />
@@ -904,6 +954,21 @@ function VoicePanel({
                   Vybraný hlas: {selectedVoiceName ?? "výchozí hlas prohlížeče"}
                 </div>
               </div>
+              <label className="mt-3 block">
+                <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Konkretni hlas</span>
+                <select
+                  className="field-input h-10"
+                  value={selectedVoiceURI}
+                  onChange={(event) => onVoiceURIChange(event.target.value)}
+                >
+                  <option value="">Automaticky vybrat nejlepsi</option>
+                  {sortedVoices.map((voice) => (
+                    <option key={voice.voiceURI} value={voice.voiceURI}>
+                      {voice.name} ({voice.lang})
+                    </option>
+                  ))}
+                </select>
+              </label>
               {isSpeaking && (
                 <button
                   className="flex w-full items-center justify-center gap-2 rounded-md border border-mint/40 bg-mint/10 px-3 py-1.5 text-xs text-mint"
@@ -935,17 +1000,58 @@ function AgentPanel({ steps, loading }: { steps: AgentStep[]; loading: boolean }
   );
 }
 
-function CarePanel({ response }: { response: ChatResponse | null }) {
+function CarePanel({
+  response,
+  userInfo,
+  loading,
+  isIndexed,
+  onSubmit
+}: {
+  response: ChatResponse | null;
+  userInfo: UserInfo;
+  loading: boolean;
+  isIndexed: boolean;
+  onSubmit: (text: string) => void;
+}) {
   const triage = response?.triage ?? null;
   const appointment = response?.appointment ?? null;
   const clinics = response?.clinics ?? [];
+  const [draft, setDraft] = useState(() => buildCarePrompt(userInfo));
+
+  function submitCare(event?: FormEvent) {
+    event?.preventDefault();
+    onSubmit(draft);
+  }
+
+  const quickPrompts = [
+    "Najdi nejdrivejsi akutni termin pro bolest zubu.",
+    "Najdi nejdrivejsi termin na dentalni hygienu.",
+    "Najdi ordinaci pobliz, ktera prijima nove pacienty."
+  ];
 
   return (
-    <section className="panel">
-      <PanelTitle icon={<CalendarCheck size={19} />} title="Pacientsky agent" subtitle="Triaz, ordinace, termin" />
-      {!triage && clinics.length === 0 && !appointment && (
-        <EmptyState text="Vyplnte problem pacienta nebo se zeptejte na termin." />
-      )}
+    <section className="panel care-agent-panel">
+      <PanelTitle icon={<CalendarCheck size={19} />} title="Pacientsky agent" subtitle="Napiste mu, co ma najit" />
+      <form className="mb-4 space-y-3" onSubmit={submitCare}>
+        <textarea
+          className="field-input min-h-24 resize-none"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Napriklad: pacient ma silnou bolest, je v Brne, najdi nejdrivejsi termin a ordinaci, ktera prijima nove pacienty."
+        />
+        <div className="flex flex-wrap gap-2">
+          {quickPrompts.map((prompt) => (
+            <button key={prompt} type="button" className="sample-chip" onClick={() => setDraft(prompt)}>
+              {prompt}
+            </button>
+          ))}
+        </div>
+        <button className="primary-button w-full" type="submit" disabled={loading || !isIndexed}>
+          {loading ? <Loader2 className="animate-spin" size={17} /> : <CalendarPlus size={17} />}
+          Najit nejdrivejsi terminy
+        </button>
+      </form>
+
       {triage && (
         <div className={`mb-3 rounded-md border p-3 ${triage.urgency === "critical" ? "border-coral/30 bg-coral/10" : triage.urgency === "high" ? "border-amber/30 bg-amber/10" : "border-mint/30 bg-mint/10"}`}>
           <div className="flex items-center justify-between gap-3">
@@ -955,6 +1061,7 @@ function CarePanel({ response }: { response: ChatResponse | null }) {
           <p className="mt-2 text-sm leading-6 text-slate-600">{triage.recommendation}</p>
         </div>
       )}
+
       {appointment && (
         <div className="mb-3 rounded-md border border-mint/30 bg-mint/10 p-3">
           <div className="mb-1 text-sm font-semibold text-ink">
@@ -968,29 +1075,47 @@ function CarePanel({ response }: { response: ChatResponse | null }) {
           </div>
         </div>
       )}
+
       <div className="space-y-2">
-        {clinics.slice(0, 3).map((clinic) => (
-          <article key={clinic.name} className="rounded-md border border-slate-200 bg-white p-3">
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <div>
-                <div className="text-sm font-semibold text-ink">{clinic.name}</div>
-                <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
-                  <MapPin size={13} /> {clinic.city}{clinic.distance_km !== null && clinic.distance_km !== undefined ? `, ${clinic.distance_km} km` : ""}
-                </div>
-              </div>
-              <span className={`shrink-0 rounded-md px-2 py-1 text-xs ${clinic.accepting_new_patients ? "bg-mint/10 text-mint" : "bg-amber/10 text-amber"}`}>
-                {clinic.accepting_new_patients ? "prijima" : "po domluve"}
-              </span>
-            </div>
-            <div className="space-y-1 text-xs text-slate-500">
-              <div className="flex items-center gap-2"><CalendarCheck size={13} /> {clinic.earliest_slot ?? "termin neni znamy"}</div>
-              <div className="flex items-center gap-2"><Phone size={13} /> {clinic.phone}</div>
-              <div className="flex items-center gap-2"><Mail size={13} /> {clinic.email}</div>
-            </div>
-          </article>
+        {clinics.length === 0 && <EmptyState text="Po odeslani se zde ukazou doporucene terminy." />}
+        {clinics.slice(0, 4).map((clinic, index) => (
+          <ClinicSlotCard key={`${clinic.name}-${index}`} clinic={clinic} rank={index + 1} compact />
         ))}
       </div>
     </section>
+  );
+}
+
+function ClinicSlotCard({ clinic, rank, compact = false }: { clinic: ClinicOption; rank: number; compact?: boolean }) {
+  const services = clinic.services ?? [];
+
+  return (
+    <article className={`clinic-slot-card ${compact ? "p-3" : "p-4"}`}>
+      <div className="mb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-mint/10 text-xs text-mint">{rank}</span>
+            <span className="truncate">{clinic.name}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+            <MapPin size={13} /> {clinic.city}{clinic.distance_km !== null && clinic.distance_km !== undefined ? `, ${clinic.distance_km} km` : ""}
+          </div>
+        </div>
+        <span className={`shrink-0 rounded-md px-2 py-1 text-xs ${clinic.accepting_new_patients ? "bg-mint/10 text-mint" : "bg-amber/10 text-amber"}`}>
+          {clinic.accepting_new_patients ? "nabira" : "po domluve"}
+        </span>
+      </div>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {services.map((service) => (
+          <span key={service} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] text-slate-600">{service}</span>
+        ))}
+      </div>
+      <div className="space-y-1 text-xs text-slate-500">
+        <div className="flex items-center gap-2"><CalendarCheck size={13} /> {clinic.earliest_slot ?? "termin neni znamy"}</div>
+        <div className="flex items-center gap-2"><Phone size={13} /> {clinic.phone}</div>
+        {!compact && <div className="flex items-center gap-2"><Mail size={13} /> {clinic.email}</div>}
+      </div>
+    </article>
   );
 }
 
@@ -1145,6 +1270,98 @@ function HistoryView({
 }
 
 // ── small shared components ────────────────────────────────────────────────
+
+function BottomWorkflowBar({
+  response,
+  cacheStats,
+  userInfo,
+  onCareSubmit
+}: {
+  response: ChatResponse | null;
+  cacheStats: CacheStats | null;
+  userInfo: UserInfo;
+  onCareSubmit: (text: string) => void;
+}) {
+  const topQuery = cacheStats?.top_frequent[0]?.query ?? "Zatim sbirame dotazy";
+  const appointment = response?.appointment;
+  const contact = userInfo.patient_phone || userInfo.patient_email || userInfo.contact || "kontakt neni vyplnen";
+  return (
+    <section className="mx-auto max-w-[1600px] px-5 pb-4">
+      <div className="bottom-workflow-bar">
+        <WorkflowTile icon={<Star size={18} />} label="Nejcastejsi dotazy" value={topQuery} detail={cacheStats ? `${cacheStats.total_tracked_queries} sledovanych dotazu` : "bez dat"} />
+        <WorkflowTile icon={<CalendarPlus size={18} />} label="Predobjednani" value={appointment?.slot_start ?? "najit nejblizsi termin"} detail={appointment?.reservation_id ?? "agent doporuci nejdrivejsi slot"} onClick={() => onCareSubmit(buildCarePrompt(userInfo))} />
+        <WorkflowTile icon={<Phone size={18} />} label="Kontakty" value={contact} detail={userInfo.patient_city || "doplnte mesto pacienta"} />
+        <WorkflowTile icon={<ShieldCheck size={18} />} label="Eskalace" value={response?.escalation_packet ? "pripravena" : "neni nutna"} detail={response?.triage?.label ?? "bez triage"} />
+      </div>
+    </section>
+  );
+}
+
+function WorkflowTile({ icon, label, value, detail, onClick }: { icon: ReactNode; label: string; value: string; detail: string; onClick?: () => void }) {
+  const className = `workflow-tile ${onClick ? "cursor-pointer" : ""}`;
+  if (onClick) {
+    return (
+      <button className={className} onClick={onClick}>
+        <span className="workflow-tile-icon">{icon}</span>
+        <span className="min-w-0 text-left">
+          <span className="block text-xs font-semibold uppercase text-slate-400">{label}</span>
+          <span className="mt-1 block truncate text-sm font-semibold text-ink">{value}</span>
+          <span className="mt-1 block truncate text-xs text-slate-500">{detail}</span>
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className={className}>
+      <span className="workflow-tile-icon">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-xs font-semibold uppercase text-slate-400">{label}</span>
+        <span className="mt-1 block truncate text-sm font-semibold text-ink">{value}</span>
+        <span className="mt-1 block truncate text-xs text-slate-500">{detail}</span>
+      </span>
+    </div>
+  );
+}
+
+function ClinicMapSection({ clinics, response }: { clinics: ClinicOption[]; response: ChatResponse | null }) {
+  const visible = clinics.slice(0, 8);
+  return (
+    <section className="mx-auto grid max-w-[1600px] gap-5 px-5 pb-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+      <div className="panel">
+        <PanelTitle icon={<Map size={19} />} title="Mapa dostupnych ordinaci" subtitle="Zubni pece a dentalni hygiena" />
+        <div className="clinic-map">
+          <div className="map-road map-road-a" />
+          <div className="map-road map-road-b" />
+          <div className="map-road map-road-c" />
+          {visible.map((clinic, index) => (
+            <div
+              key={`${clinic.name}-${index}`}
+              className={`map-pin ${clinic.accepting_new_patients ? "map-pin-open" : "map-pin-limited"}`}
+              style={{ left: `${clinic.map_x ?? 50}%`, top: `${clinic.map_y ?? 50}%` }}
+              title={`${clinic.name} - ${clinic.city}`}
+            >
+              {index + 1}
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1"><span className="legend-dot bg-mint" /> nabira nove pacienty</span>
+          <span className="inline-flex items-center gap-1"><span className="legend-dot bg-amber" /> jen po domluve</span>
+          <span>{response?.appointment ? `Predrezervace: ${response.appointment.reservation_id ?? response.appointment.status}` : "Vyberte pacienta a nechte agenta najit terminy."}</span>
+        </div>
+      </div>
+      <div className="panel">
+        <PanelTitle icon={<Building2 size={19} />} title="Ordinace a hygiena" subtitle="Dostupnost podle demo adresare" />
+        <div className="thin-scroll max-h-80 space-y-2 overflow-y-auto pr-1">
+          {visible.length === 0 && <EmptyState text="Ordinace se nacitaji." />}
+          {visible.map((clinic, index) => (
+            <ClinicSlotCard key={`${clinic.name}-map-${index}`} clinic={clinic} rank={index + 1} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
@@ -1391,18 +1608,66 @@ function normalizeVoiceName(value: string): string {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function selectAssistantVoice(voices: SpeechSynthesisVoice[], gender: VoiceGender): SpeechSynthesisVoice | null {
+function buildCarePrompt(user: UserInfo): string {
+  const name = user.patient_name?.trim() || "pacient";
+  const city = user.patient_city?.trim() || user.patient_address?.trim() || "nejblizsi dostupna lokalita";
+  const contact = user.patient_phone?.trim() || user.patient_email?.trim() || user.contact?.trim() || "kontakt chybi";
+  const urgency = {
+    low: "nizka urgence",
+    normal: "bezna urgence",
+    high: "vysoka urgence",
+    critical: "kriticka urgence"
+  }[user.urgency ?? "normal"];
+  const problem = user.problem_summary?.trim() || "pacient potrebuje najit vhodnou ordinaci a nejdrivejsi termin";
+  const preferred = user.preferred_contact_method && user.preferred_contact_method !== "any"
+    ? `Preferovany kontakt: ${user.preferred_contact_method}.`
+    : "Kontakt zvol podle dostupnosti.";
+
+  return [
+    `Pacient: ${name}.`,
+    `Lokalita: ${city}.`,
+    `Kontakt: ${contact}.`,
+    `Urgence: ${urgency}.`,
+    `Problem: ${problem}.`,
+    preferred,
+    "Vyhodnot urgenci, najdi nejdrivejsi termin, doporuc ordinace pobliz a priprav predrezervaci nebo eskalaci."
+  ].join(" ");
+}
+
+function sortVoices(voices: SpeechSynthesisVoice[], gender: VoiceGender): SpeechSynthesisVoice[] {
+  return [...voices].sort((left, right) => voiceScore(right, gender) - voiceScore(left, gender));
+}
+
+function voiceScore(voice: SpeechSynthesisVoice, gender: VoiceGender): number {
+  const name = normalizeVoiceName(`${voice.name} ${voice.voiceURI} ${voice.lang}`);
+  let score = 0;
+  if (voice.lang.toLowerCase().startsWith("cs")) score += 80;
+  if (voice.lang.toLowerCase().startsWith("sk")) score += 25;
+  if (name.includes("google")) score += 8;
+  if (name.includes("microsoft")) score += 10;
+  if (voice.localService) score += 3;
+
+  const femaleHints = ["female", "woman", "zena", "zuzana", "vlasta", "iveta", "helena", "jitka", "sara", "katerina", "tereza", "marketa", "lucie"];
+  const maleHints = ["male", "man", "muz", "jakub", "antonin", "petr", "ondrej", "michal", "jan", "jiri", "tomas"];
+  const wanted = gender === "female" ? femaleHints : maleHints;
+  const unwanted = gender === "female" ? maleHints : femaleHints;
+
+  if (wanted.some((hint) => name.includes(normalizeVoiceName(hint)))) score += 60;
+  if (unwanted.some((hint) => name.includes(normalizeVoiceName(hint)))) score -= 60;
+  return score;
+}
+
+function selectAssistantVoice(
+  voices: SpeechSynthesisVoice[],
+  gender: VoiceGender,
+  preferredVoiceURI = ""
+): SpeechSynthesisVoice | null {
+  const preferred = voices.find((voice) => voice.voiceURI === preferredVoiceURI);
+  if (preferred) return preferred;
+
   const czechVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("cs"));
   const candidates = czechVoices.length > 0 ? czechVoices : voices;
-  const hints =
-    gender === "female"
-      ? ["female", "woman", "zena", "vlasta", "zuzana", "tereza", "iveta", "helena", "jitka", "sara", "katerina"]
-      : ["male", "man", "muz", "jakub", "antonin", "petr", "ondrej", "michal", "jan"];
-  const hinted = candidates.find((voice) => {
-    const name = normalizeVoiceName(`${voice.name} ${voice.voiceURI}`);
-    return hints.some((hint) => name.includes(normalizeVoiceName(hint)));
-  });
-  return hinted ?? czechVoices[0] ?? voices[0] ?? null;
+  return sortVoices(candidates, gender)[0] ?? czechVoices[0] ?? voices[0] ?? null;
 }
 
 function toleranceName(value: RetrievalTolerance): string {

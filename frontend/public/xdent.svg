@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="XDENT">
+  <rect width="64" height="64" rx="12" fill="#111827"/>
+  <path d="M10 48 25.5 16h8L18 48h-8Z" fill="#1E9D73"/>
+  <path d="M30.5 16 54 48h-9.5L21 16h9.5Z" fill="#F8FAFC"/>
+  <path d="M32 41c4.5-2.8 8-2.8 12.5 0v6.5H32V41Z" fill="#1E9D73"/>
+  <text x="32" y="58" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="7" font-weight="800" fill="#F8FAFC">XDENT</text>
+</svg>

@@ -63,6 +63,9 @@ export type ClinicOption = {
   address: string;
   distance_km?: number | null;
   accepting_new_patients: boolean;
+  services: string[];
+  map_x: number;
+  map_y: number;
   phone: string;
   email: string;
   earliest_slot?: string | null;

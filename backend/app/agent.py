@@ -209,8 +209,23 @@ class SupportAgent:
                 answer_status = "warning"
                 answer_detail = f"LLM odpověď se nepodařila, použit bezpečný fallback ze zdrojů: {exc}"
 
+        if not grounded or (care_result and self._needs_escalation(care_result)):
+            reason = (
+                "Nizka shoda v transkripcich nebo chybejici overeny postup."
+                if not grounded
+                else "Pacientsky pripad vyzaduje rychle predani recepci nebo 2. urovni."
+            )
+            escalation_packet = self._build_escalation_packet(
+                message=message,
+                topic=classified.label,
+                reason=reason,
+                user=user,
+                sources=sources,
+                care=care_result,
+            )
+
         if care_result:
-            answer = self._append_care_context(answer, care_result)
+            answer = self._compose_care_answer(care_result, sources if grounded else [])
 
         steps.append(
             AgentStep(
@@ -300,7 +315,16 @@ class SupportAgent:
     def _run_care_workflow(self, message: str, user: UserInfo | None) -> CareWorkflowResult:
         triage = assess_urgency(message, user)
         city = self._care_location(user)
-        clinics = find_nearby_clinics(city, triage.urgency)
+        service_query = " ".join(
+            filter(
+                None,
+                [
+                    message,
+                    user.problem_summary if user else None,
+                ],
+            )
+        )
+        clinics = find_nearby_clinics(city, triage.urgency, service_query=service_query)
         appointment = (
             reserve_earliest_slot(message=message, user=user, triage=triage, clinics=clinics)
             if self._wants_booking(message, user, triage)
@@ -352,11 +376,11 @@ class SupportAgent:
 
         if care.clinics:
             clinic_parts = []
-            for clinic in care.clinics[:2]:
+            for clinic in care.clinics[:3]:
                 accepting = "prijima nove pacienty" if clinic.accepting_new_patients else "nove pacienty jen po domluve"
                 distance = f", {clinic.distance_km} km" if clinic.distance_km is not None else ""
                 clinic_parts.append(f"{clinic.name} ({clinic.city}{distance}, {accepting}, nejdrive {clinic.earliest_slot})")
-            lines.append("Ordinace pobliz: " + "; ".join(clinic_parts))
+            lines.append("Nejdrivejsi terminy: " + "; ".join(clinic_parts))
 
         if care.appointment:
             if care.appointment.status == "pre_reserved":
@@ -372,6 +396,98 @@ class SupportAgent:
             lines.append("Pozn.: ordinace a terminy jsou demo workflow; v ostrem provozu se napoji kalendar XDENT.")
         return answer.strip() + "\n\n" + "\n".join(lines)
 
+    def _compose_care_answer(self, care: CareWorkflowResult, sources: list[Source]) -> str:
+        lines: list[str] = []
+        if care.triage:
+            if care.triage.urgency == "critical":
+                lines.append("Urgence je kriticka: volejte ordinaci nebo pohotovost ihned.")
+            else:
+                lines.append(f"Urgence: {care.triage.label}. {care.triage.recommendation}")
+
+        if care.appointment:
+            if care.appointment.status == "pre_reserved":
+                lines.append(
+                    f"Nejdrivejsi termin: {care.appointment.clinic_name}, "
+                    f"{care.appointment.slot_start}. Predrezervace {care.appointment.reservation_id}; recepce ji musi potvrdit."
+                )
+            else:
+                lines.append(care.appointment.message)
+
+        if care.clinics:
+            clinic_parts = []
+            for clinic in care.clinics[:3]:
+                accepting = "nabira" if clinic.accepting_new_patients else "po domluve"
+                distance = f", {clinic.distance_km} km" if clinic.distance_km is not None else ""
+                clinic_parts.append(f"{clinic.name} ({clinic.city}{distance}, {accepting}, {clinic.earliest_slot})")
+            lines.append("Dalsi dostupne moznosti: " + "; ".join(clinic_parts))
+
+        lines.append("Pozn.: terminy jsou demo predrezervace; v ostrem provozu se napoji primo na kalendar XDENT.")
+        lines.append(f"Zdroj: {sources[0].source if sources else 'demo adresar ordinaci + pacientsky workflow'}")
+        return "\n".join(lines)
+
+    def _needs_escalation(self, care: CareWorkflowResult) -> bool:
+        return bool(
+            (care.triage and care.triage.urgency == "critical")
+            or (care.appointment and care.appointment.status in {"needs_contact", "unavailable"})
+        )
+
+    def _build_escalation_packet(
+        self,
+        *,
+        message: str,
+        topic: str,
+        reason: str,
+        user: UserInfo | None,
+        sources: list[Source],
+        care: CareWorkflowResult | None,
+    ) -> str:
+        patient = user.patient_name if user and user.patient_name else "neuvedeno"
+        contact = self._best_patient_contact(user)
+        location = self._care_location(user) or "neuvedeno"
+        urgency = care.triage.label if care and care.triage else self._urgency_label(user.urgency if user else None) or "neuvedeno"
+        next_slot = "neuvedeno"
+        reservation = "bez rezervace"
+        if care and care.appointment:
+            next_slot = care.appointment.slot_start or "neuvedeno"
+            reservation = care.appointment.reservation_id or care.appointment.status
+        clinic_lines = []
+        if care:
+            for clinic in care.clinics[:3]:
+                accepting = "ano" if clinic.accepting_new_patients else "po domluve"
+                clinic_lines.append(
+                    f"  - {clinic.name}, {clinic.city}, prijima nove: {accepting}, nejdrive: {clinic.earliest_slot}, tel.: {clinic.phone}"
+                )
+        source_lines = [f"  - {source.source} (score {source.score})" for source in sources[:3]]
+        return "\n".join(
+            [
+                "ESKALACE - XDENT AI",
+                f"Duvod: {reason}",
+                f"Tema: {topic}",
+                f"Dotaz: {message}",
+                "",
+                "Pacient / kontakt",
+                f"- Pacient: {patient}",
+                f"- Kontakt: {contact or 'chybi - doplnit telefon nebo e-mail'}",
+                f"- Lokalita: {location}",
+                f"- Urgence: {urgency}",
+                "",
+                "Navrzeny dalsi krok",
+                f"- Overit termin: {next_slot}",
+                f"- Rezervace: {reservation}",
+                "- Pokud jde o otok, horecku, uraz nebo silne krvaceni, volat ordinaci/pohotovost ihned.",
+                "",
+                "Doporucene ordinace",
+                *(clinic_lines or ["  - nejsou k dispozici"]),
+                "",
+                "Pouzite zdroje",
+                *(source_lines or ["  - nedostatecny kontext"]),
+                "",
+                "Co doplnit pri predani",
+                "- screenshot/chybovou hlasku, cas vyskytu, kroky k reprodukci",
+                "- potvrzeny telefon/e-mail pacienta a souhlas s kontaktovanim",
+            ]
+        )
+
     def _wants_care_workflow(self, message: str, user: UserInfo | None) -> bool:
         text = message.lower()
         keywords = (
@@ -386,6 +502,7 @@ class SupportAgent:
             "objednat",
             "rezerv",
             "predobjednat",
+            "hygien",
             "předobjednat",
         )
         has_patient_context = bool(
@@ -410,6 +527,7 @@ class SupportAgent:
             "rezerv",
             "predobjednat",
             "předobjednat",
+            "hygien",
             "nejdrive",
             "nejdříve",
         )
@@ -423,6 +541,14 @@ class SupportAgent:
         if not user:
             return None
         return user.patient_city or user.clinic or user.patient_address
+
+    def _best_patient_contact(self, user: UserInfo | None) -> str | None:
+        if not user:
+            return None
+        for value in (user.patient_phone, user.patient_email, user.contact):
+            if value and value.strip():
+                return value.strip()
+        return None
 
     def _select_answer_sources(self, sources: list[Source], topic: str | None) -> list[Source]:
         if not sources:
