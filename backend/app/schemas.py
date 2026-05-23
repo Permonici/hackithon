@@ -5,7 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-AgentMode = Literal["support", "patient", "handoff"]
+AgentMode = Literal["support", "patient", "triage", "scheduler", "handoff"]
 
 
 class UserInfo(BaseModel):

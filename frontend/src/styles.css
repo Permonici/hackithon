@@ -90,7 +90,7 @@ body {
   }
 
   .chat-bubble {
-    @apply max-w-[94%] rounded-md px-4 py-3 shadow-sm md:max-w-[84%];
+    @apply max-w-[96%] rounded-md px-5 py-4 shadow-sm md:max-w-[90%];
   }
 
   .chat-bubble-user {
@@ -170,11 +170,11 @@ body {
   .xdent-chat-popup {
     position: fixed;
     right: 24px;
-    bottom: 96px;
+    bottom: 94px;
     z-index: 50;
     display: flex;
-    width: min(430px, calc(100vw - 32px));
-    height: min(720px, calc(100vh - 122px));
+    width: min(620px, calc(100vw - 32px));
+    height: min(860px, calc(100vh - 118px));
     overflow: hidden;
     flex-direction: column;
     border: 1px solid rgba(15, 23, 42, 0.14);
@@ -197,12 +197,20 @@ body {
     @apply flex min-h-12 items-center gap-2 border-b border-slate-200 bg-slate-50 px-4;
   }
 
+  .agent-switch-wrap {
+    @apply border-b border-slate-200 bg-white px-4 py-3;
+  }
+
+  .agent-switch-title {
+    @apply mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400;
+  }
+
   .agent-switch {
-    @apply grid grid-cols-3 gap-2 border-b border-slate-200 bg-white px-4 py-3;
+    @apply flex gap-2 overflow-x-auto pb-1;
   }
 
   .agent-option {
-    @apply flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-2 text-center text-xs font-semibold text-slate-600 transition hover:border-mint hover:text-mint;
+    @apply flex min-h-14 min-w-32 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 px-3 text-center text-xs font-semibold text-slate-600 transition hover:border-mint hover:text-mint;
   }
 
   .agent-option small {
@@ -230,7 +238,7 @@ body {
   }
 
   .xdent-chat-messages {
-    @apply min-h-0 flex-1 space-y-4 overflow-y-auto bg-white px-4 py-4;
+    @apply min-h-0 flex-1 space-y-5 overflow-y-auto bg-white px-5 py-5;
   }
 
   .xdent-chat-samples {
@@ -250,7 +258,7 @@ body {
   }
 
   .xdent-chat-input {
-    @apply grid gap-3 border-t border-slate-200 bg-white p-4;
+    @apply grid gap-3 border-t border-slate-200 bg-white p-5;
   }
 
   .xdent-chat-launcher {
@@ -274,6 +282,24 @@ body {
   .xdent-chat-launcher:hover {
     transform: translateY(-2px);
     background: #167f5d;
+  }
+
+  @media (max-width: 680px) {
+    .xdent-chat-popup {
+      right: 12px;
+      left: 12px;
+      bottom: 86px;
+      width: auto;
+      height: min(820px, calc(100vh - 104px));
+    }
+
+    .xdent-chat-messages {
+      @apply px-4 py-4;
+    }
+
+    .chat-bubble {
+      @apply max-w-[98%] px-4;
+    }
   }
 }
 
@@ -411,6 +437,7 @@ body {
 .dark .xdent-chat-status,
 .dark .xdent-chat-samples,
 .dark .xdent-chat-actions,
+.dark .agent-switch-wrap,
 .dark .agent-switch,
 .dark .memory-strip {
   background: #111827;

@@ -1,5 +1,5 @@
 export type RetrievalTolerance = "strict" | "balanced" | "broad";
-export type AgentMode = "support" | "patient" | "handoff";
+export type AgentMode = "support" | "patient" | "triage" | "scheduler" | "handoff";
 
 export type UserInfo = {
   name?: string | null;

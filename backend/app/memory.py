@@ -158,7 +158,7 @@ class PatientMemoryStore:
             data["urgency"] = urgency
 
         strong_patient_signal = (
-            agent_mode in {"patient", "handoff"}
+            agent_mode in {"patient", "triage", "scheduler", "handoff"}
             or bool(data)
             or any(term in lowered for term in ("boli", "bolest", "otok", "zub", "pohotovost", "nejdrivejsi termin"))
         )
@@ -191,7 +191,7 @@ class PatientMemoryStore:
         return None
 
     def _looks_like_problem(self, lowered: str, agent_mode: str) -> bool:
-        if agent_mode in {"patient", "handoff"}:
+        if agent_mode in {"patient", "triage", "scheduler", "handoff"}:
             return not lowered.strip() in {"ano", "ne", "ok", "diky", "děkuji", "dekuji"}
         return any(signal in lowered for signal in PATIENT_SIGNALS)
 

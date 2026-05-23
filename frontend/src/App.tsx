@@ -1,6 +1,8 @@
 import {
+  Activity,
   AlertTriangle,
   Bot,
+  Calendar,
   CheckCircle2,
   Copy,
   Database,
@@ -31,6 +33,8 @@ const STORAGE_PATIENT_MEMORY = "xdent.chat.patientMemory";
 const agentOptions: Array<{ id: AgentMode; label: string; hint: string; icon: ReactNode }> = [
   { id: "support", label: "Podpora", hint: "XDENT software", icon: <Bot size={15} /> },
   { id: "patient", label: "Pacient", hint: "urgence a termin", icon: <HeartPulse size={15} /> },
+  { id: "triage", label: "Triaz", hint: "priorita pripadu", icon: <Activity size={15} /> },
+  { id: "scheduler", label: "Terminy", hint: "nejdrivejsi cas", icon: <Calendar size={15} /> },
   { id: "handoff", label: "Eskalace", hint: "predani podpore", icon: <LifeBuoy size={15} /> }
 ];
 
@@ -44,6 +48,16 @@ const demoQuestions: Record<AgentMode, string[]> = {
     "Jmenuji se Jana Novakova, jsem z Prahy, boli me zub a potrebuji nejdrivejsi termin. Telefon 777 123 456.",
     "Mam otok a silnou bolest, jsem v Brne. Co mam delat?",
     "Chci objednat dentalni hygienu v Praze, muj e-mail je pacient@example.cz."
+  ],
+  triage: [
+    "Mam otok, horecku a silnou bolest zubu. Jsem v Brne.",
+    "Boli me zub uz treti den, ale nemam otok. Jakou to ma prioritu?",
+    "Chci jen preventivni kontrolu a nevim, jestli je to urgentni."
+  ],
+  scheduler: [
+    "Najdi nejdrivejsi termin v Praze pro bolest zubu. Telefon 777 123 456.",
+    "Potrebuji dentalni hygienu v Brne co nejdrive.",
+    "Mam ulozeny kontakt, najdi nejrychlejsi dostupny termin."
   ],
   handoff: [
     "Priprav eskalaci pro podporu, eRecept nejde odeslat a mam screenshot chyby.",
@@ -439,18 +453,21 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
 
 function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: (mode: AgentMode) => void }) {
   return (
-    <div className="agent-switch" aria-label="Vyber agenta">
-      {agentOptions.map((agent) => (
-        <button
-          key={agent.id}
-          className={`agent-option ${selected === agent.id ? "agent-option-active" : ""}`}
-          type="button"
-          onClick={() => onSelect(agent.id)}
-        >
-          <span className="inline-flex items-center gap-1.5">{agent.icon}{agent.label}</span>
-          <small>{agent.hint}</small>
-        </button>
-      ))}
+    <div className="agent-switch-wrap">
+      <div className="agent-switch-title">Prepnout agenta</div>
+      <div className="agent-switch thin-scroll" aria-label="Vyber agenta">
+        {agentOptions.map((agent) => (
+          <button
+            key={agent.id}
+            className={`agent-option ${selected === agent.id ? "agent-option-active" : ""}`}
+            type="button"
+            onClick={() => onSelect(agent.id)}
+          >
+            <span className="inline-flex items-center gap-1.5">{agent.icon}{agent.label}</span>
+            <small>{agent.hint}</small>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -480,7 +497,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   const answerConfidence = answerConfidencePercent(message.response);
   const sourceStrength = sourceStrengthPercent(message.response?.sources ?? []);
   const assistantTitle = message.response
-    ? `${message.response.agent_label ?? "XDENT asistent"} · ${message.response.topic_label ?? "odpoved"}`
+    ? `${message.response.agent_label ?? "XDENT asistent"} - ${message.response.topic_label ?? "odpoved"}`
     : "XDENT asistent";
 
   async function copyContent() {
@@ -658,6 +675,8 @@ function urgencyLabel(value: UserInfo["urgency"]): string {
 
 function placeholderForAgent(agentMode: AgentMode): string {
   if (agentMode === "patient") return "Popiste problem, mesto a kontakt pacienta...";
+  if (agentMode === "triage") return "Popiste priznaky a jak dlouho trvaji...";
+  if (agentMode === "scheduler") return "Zadejte mesto, typ osetreni a kontakt...";
   if (agentMode === "handoff") return "Popiste, co se ma predat podpore...";
   return "Napiste dotaz k XDENTu...";
 }

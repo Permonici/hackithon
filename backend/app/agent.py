@@ -72,6 +72,14 @@ AGENT_PROFILES = {
         "label": "Pacientsky koordinator",
         "instruction": "Sbirej jen nutne udaje pacienta, vyhodnot urgenci a navrhni dalsi krok.",
     },
+    "triage": {
+        "label": "Triazni agent",
+        "instruction": "Vyhodnot urgenci pacienta a rekni nejbezpecnejsi dalsi krok.",
+    },
+    "scheduler": {
+        "label": "Terminovy agent",
+        "instruction": "Hledej nejdrivejsi vhodny termin a hlidej, zda jsou ulozene kontaktni udaje.",
+    },
     "handoff": {
         "label": "Eskalacni agent",
         "instruction": "Priprav kratke predani pro podporu nebo recepci, kdyz chybi jistota nebo udaje.",
@@ -246,8 +254,8 @@ class SupportAgent:
             )
         )
 
-        wants_care = agent_mode in {"patient", "handoff"} or self._wants_care_workflow(message, effective_user)
-        care_result = self._run_care_workflow(message, effective_user) if wants_care else None
+        wants_care = agent_mode in {"patient", "triage", "scheduler", "handoff"} or self._wants_care_workflow(message, effective_user)
+        care_result = self._run_care_workflow(message, effective_user, force_booking=agent_mode == "scheduler") if wants_care else None
         if care_result:
             steps.extend(care_result.steps)
 
@@ -402,7 +410,7 @@ class SupportAgent:
             f"Podle dostupných hovorů: {resolution}"
         ), False
 
-    def _run_care_workflow(self, message: str, user: UserInfo | None) -> CareWorkflowResult:
+    def _run_care_workflow(self, message: str, user: UserInfo | None, *, force_booking: bool = False) -> CareWorkflowResult:
         triage = assess_urgency(message, user)
         city = self._care_location(user)
         service_query = " ".join(
@@ -417,7 +425,7 @@ class SupportAgent:
         clinics = find_nearby_clinics(city, triage.urgency, service_query=service_query)
         appointment = (
             reserve_earliest_slot(message=message, user=user, triage=triage, clinics=clinics)
-            if self._wants_booking(message, user, triage)
+            if force_booking or self._wants_booking(message, user, triage)
             else None
         )
 
@@ -510,7 +518,7 @@ class SupportAgent:
                 clinic_parts.append(f"{clinic.name}: {clinic.earliest_slot}, {accepting}")
             lines.append("Alternativy: " + "; ".join(clinic_parts))
 
-        missing = self._missing_patient_fields(user, require_location=agent_mode == "patient")
+        missing = self._missing_patient_fields(user, require_location=agent_mode in {"patient", "scheduler"})
         if missing:
             lines.append("Pro rychle vyrizeni doplnte: " + ", ".join(missing) + ".")
 
@@ -540,14 +548,17 @@ class SupportAgent:
         grounded: bool,
     ) -> list[str]:
         actions: list[str] = []
-        if agent_mode == "patient":
+        if agent_mode in {"patient", "triage", "scheduler"}:
             for missing in self._missing_patient_fields(user, require_location=True):
                 actions.append(f"Doplnit {missing}")
             if care and care.appointment and care.appointment.status == "needs_contact":
                 actions.append("Doplnit kontakt pro predrezervaci")
             if care and care.triage and care.triage.urgency in {"high", "critical"}:
                 actions.append("Zavolat ordinaci")
-            actions.append("Najit nejdrivejsi termin")
+            if agent_mode != "triage":
+                actions.append("Najit nejdrivejsi termin")
+            if agent_mode == "triage":
+                actions.append("Predat recepci")
         if has_escalation:
             actions.append("Kopirovat eskalaci")
         if not grounded and agent_mode == "support":
