@@ -10,6 +10,7 @@ from typing import Any
 MAX_CACHE_SIZE = 200
 DEFAULT_TTL = 7_200       # 2 hours
 FREQUENT_THRESHOLD = 3    # queries seen this many times are persisted to disk
+CACHE_VERSION = "rag-v3"
 
 
 class QueryCache:
@@ -40,7 +41,7 @@ class QueryCache:
     ) -> tuple[str, str]:
         """Return (cache_key_hex, normalized_query)."""
         normalized = " ".join(message.lower().split())
-        raw = f"{normalized}|{strict_mode}|{tolerance}|{top_k}"
+        raw = f"{CACHE_VERSION}|{normalized}|{strict_mode}|{tolerance}|{top_k}"
         return hashlib.sha256(raw.encode()).hexdigest(), normalized
 
     def get(self, key: str) -> Any | None:

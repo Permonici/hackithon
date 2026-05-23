@@ -293,12 +293,12 @@ def _adjusted_relevance_score(
     quality = float(metadata.get("quality") or 0.0)
 
     return (
-        (float(score) * 0.72)
-        + (0.1 if topic_matches else 0.0)
-        + (query_overlap * 0.24)
-        + (topic_overlap * 0.08)
-        + (quality * 0.08)
-        + (0.04 if metadata.get("resolution") else 0.0)
+        (float(score) * 0.52)
+        + (0.08 if topic_matches else 0.0)
+        + (query_overlap * 0.42)
+        + (topic_overlap * 0.05)
+        + (quality * 0.05)
+        + (0.03 if metadata.get("resolution") else 0.0)
     )
 
 

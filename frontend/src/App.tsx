@@ -400,6 +400,7 @@ function App() {
                 memoryUpdates={savedResponse?.memory_updates ?? []}
                 escalationPacket={latestEscalation}
                 onCycleFont={() => setFontScale((current) => nextFontScale(current))}
+                onClose={() => setToolsOpen(false)}
                 onForgetMemory={clearPatientMemory}
               />
             )}
@@ -582,6 +583,7 @@ function ChatToolsPanel({
   memoryUpdates,
   escalationPacket,
   onCycleFont,
+  onClose,
   onForgetMemory,
 }: {
   fontScale: FontScale;
@@ -589,6 +591,7 @@ function ChatToolsPanel({
   memoryUpdates: string[];
   escalationPacket: string | null;
   onCycleFont: () => void;
+  onClose: () => void;
   onForgetMemory: () => void;
 }) {
   const [copiedEscalation, setCopiedEscalation] = useState(false);
@@ -612,49 +615,61 @@ function ChatToolsPanel({
 
   return (
     <section className="chat-tools-panel" aria-label="Nastroje chatu">
-      <div className="tool-row">
-        <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
-        <button
-          className="font-size-button font-size-button-a"
-          type="button"
-          title="Zvětšení písma"
-          aria-label="Zvětšení písma"
-          onClick={onCycleFont}
-        >
-          A
+      <div className="chat-tools-header">
+        <div>
+          <div className="text-xs font-semibold text-ink">Nastaveni chatu</div>
+          <div className="text-[11px] text-slate-500">Pismo, pamet pacienta a eskalace.</div>
+        </div>
+        <button className="panel-close-button" type="button" onClick={onClose} title="Zavrit nastaveni" aria-label="Zavrit nastaveni">
+          <X size={15} />
         </button>
       </div>
 
-      <div className="tool-row">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
-          <div className="truncate text-xs text-slate-500">{memorySummary}</div>
-        </div>
-        {memoryItems.length > 0 && (
-          <button className="memory-forget" type="button" onClick={onForgetMemory}>
-            Zapomenout
+      <div className="chat-tools-scroll thin-scroll">
+        <div className="tool-row">
+          <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
+          <button
+            className="font-size-button font-size-button-a"
+            type="button"
+            title="Zvětšení písma"
+            aria-label="Zvětšení písma"
+            onClick={onCycleFont}
+          >
+            A
           </button>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {memoryItems.length > 0
-          ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
-          : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
-      </div>
-
-      <div className="tool-row">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-ink">Eskalace</div>
-          <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
         </div>
-        <button
-          className="quick-action"
-          type="button"
-          onClick={() => { void copyEscalation(); }}
-          disabled={!escalationPacket}
-        >
-          {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
-        </button>
+
+        <div className="tool-row">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
+            <div className="truncate text-xs text-slate-500">{memorySummary}</div>
+          </div>
+          {memoryItems.length > 0 && (
+            <button className="memory-forget" type="button" onClick={onForgetMemory}>
+              Zapomenout
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {memoryItems.length > 0
+            ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
+            : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
+        </div>
+
+        <div className="tool-row">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold text-ink">Eskalace</div>
+            <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
+          </div>
+          <button
+            className="quick-action"
+            type="button"
+            onClick={() => { void copyEscalation(); }}
+            disabled={!escalationPacket}
+          >
+            {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
+          </button>
+        </div>
       </div>
     </section>
   );
