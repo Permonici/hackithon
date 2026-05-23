@@ -7,7 +7,6 @@ import {
   ChevronUp,
   CheckCircle2,
   Copy,
-  Database,
   HeartPulse,
   LifeBuoy,
   Loader2,
@@ -16,6 +15,7 @@ import {
   MicOff,
   RefreshCw,
   Send,
+  SlidersHorizontal,
   Trash2,
   Volume2,
   VolumeX,
@@ -102,6 +102,7 @@ function App() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(() => loadJson<boolean>(STORAGE_VOICE_OUTPUT, false));
   const [fontScale, setFontScale] = useState<FontScale>(() => loadJson<FontScale>(STORAGE_FONT_SCALE, "normal"));
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [ttsVoices, setTtsVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -114,7 +115,6 @@ function App() {
   const savedResponse = useMemo(() => [...messages].reverse().find((item) => item.response)?.response ?? null, [messages]);
   const visibleSteps = loading ? liveSteps : savedResponse?.steps ?? liveSteps;
   const selectedVoice = selectCzechVoice(ttsVoices);
-  const topFrequent = cacheStats?.top_frequent?.[0]?.query;
   const samples = demoQuestions[agentMode];
   const frequentQuestions = useMemo(() => mergeFrequentQuestions(cacheStats?.top_frequent.map((item) => item.query) ?? [], samples), [cacheStats, samples]);
   const latestActions = savedResponse?.next_actions ?? [];
@@ -351,15 +351,6 @@ function App() {
             </div>
           </header>
 
-          <div className="xdent-chat-status">
-            <StatusChip ok={isIndexed} icon={<Database size={14} />} label={isIndexed ? "Index pripraven" : "Index prazdny"} />
-            {topFrequent && (
-              <button className="truncate text-left text-xs text-slate-500 hover:text-ocean" onClick={() => setMessage(topFrequent)} title="Vlozit nejcastejsi dotaz">
-                Casto: {topFrequent}
-              </button>
-            )}
-          </div>
-
           <AgentSwitcher selected={agentMode} onSelect={chooseAgent} />
 
           {!isIndexed && (
@@ -396,18 +387,22 @@ function App() {
             </div>
           )}
 
-          <QuickQuestionsStrip
+          <FrequentQuestionsStrip
             questions={frequentQuestions}
-            fontScale={fontScale}
-            memory={patientMemory}
-            memoryUpdates={savedResponse?.memory_updates ?? []}
-            escalationPacket={latestEscalation}
             onPickQuestion={setMessage}
-            onCycleFont={() => setFontScale((current) => nextFontScale(current))}
-            onForgetMemory={clearPatientMemory}
           />
 
           <form className="xdent-chat-input" onSubmit={handleSend}>
+            {toolsOpen && (
+              <ChatToolsPanel
+                fontScale={fontScale}
+                memory={patientMemory}
+                memoryUpdates={savedResponse?.memory_updates ?? []}
+                escalationPacket={latestEscalation}
+                onCycleFont={() => setFontScale((current) => nextFontScale(current))}
+                onForgetMemory={clearPatientMemory}
+              />
+            )}
             <textarea
               className="field-input min-h-20 resize-none"
               value={message}
@@ -433,6 +428,15 @@ function App() {
                     {voiceOutputEnabled ? <Volume2 size={17} /> : <VolumeX size={17} />}
                   </button>
                 )}
+                <button
+                  type="button"
+                  className={`icon-button ${toolsOpen ? "icon-button-active" : ""}`}
+                  onClick={() => setToolsOpen((value) => !value)}
+                  title="Nastroje"
+                  aria-expanded={toolsOpen}
+                >
+                  <SlidersHorizontal size={17} />
+                </button>
                 <button type="button" className="icon-button" onClick={copyHistory} title="Kopirovat historii" disabled={messages.length === 0}>
                   <Copy size={17} />
                 </button>
@@ -545,26 +549,48 @@ function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: 
   );
 }
 
-function QuickQuestionsStrip({
+function FrequentQuestionsStrip({
   questions,
+  onPickQuestion,
+}: {
+  questions: string[];
+  onPickQuestion: (question: string) => void;
+}) {
+  return (
+    <details className="quick-strip" aria-label="Nejcastejsi dotazy">
+      <summary>
+        <span>Nejcastejsi dotazy</span>
+        <span>{questions.length} dotazu</span>
+      </summary>
+
+      <div className="quick-strip-content">
+        <div className="quick-question-rail thin-scroll" aria-label="Caste dotazy">
+          {questions.map((question) => (
+            <button key={question} className="sample-chip quick-question-chip" type="button" onClick={() => onPickQuestion(question)}>
+              {question}
+            </button>
+          ))}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ChatToolsPanel({
   fontScale,
   memory,
   memoryUpdates,
   escalationPacket,
-  onPickQuestion,
   onCycleFont,
   onForgetMemory,
 }: {
-  questions: string[];
   fontScale: FontScale;
   memory: UserInfo | null;
   memoryUpdates: string[];
   escalationPacket: string | null;
-  onPickQuestion: (question: string) => void;
   onCycleFont: () => void;
   onForgetMemory: () => void;
 }) {
-  const [toolsOpen, setToolsOpen] = useState(false);
   const [copiedEscalation, setCopiedEscalation] = useState(false);
   const memoryItems = memoryChips(memory);
   const memorySummary = memoryUpdates.length
@@ -585,80 +611,51 @@ function QuickQuestionsStrip({
   }
 
   return (
-    <section className="quick-strip" aria-label="Rychle volby">
-      <div className="quick-strip-head">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-ink">Caste dotazy</div>
-          <div className="truncate text-[11px] text-slate-500">Posunte do stran a vyberte pripraveny dotaz.</div>
-        </div>
+    <section className="chat-tools-panel" aria-label="Nastroje chatu">
+      <div className="tool-row">
+        <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
         <button
-          className="quick-strip-toggle"
+          className="font-size-button font-size-button-a"
           type="button"
-          onClick={() => setToolsOpen((value) => !value)}
-          aria-expanded={toolsOpen}
-          title="Pamet pacienta, eskalace a pismo"
+          title="Zvětšení písma"
+          aria-label="Zvětšení písma"
+          onClick={onCycleFont}
         >
-          {toolsOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-          Nastroje
+          A
         </button>
       </div>
 
-      <div className="quick-question-rail thin-scroll" aria-label="Caste dotazy">
-        {questions.map((question) => (
-          <button key={question} className="sample-chip quick-question-chip" type="button" onClick={() => onPickQuestion(question)}>
-            {question}
+      <div className="tool-row">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
+          <div className="truncate text-xs text-slate-500">{memorySummary}</div>
+        </div>
+        {memoryItems.length > 0 && (
+          <button className="memory-forget" type="button" onClick={onForgetMemory}>
+            Zapomenout
           </button>
-        ))}
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {memoryItems.length > 0
+          ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
+          : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
       </div>
 
-      {toolsOpen && (
-        <div className="quick-strip-content">
-          <div className="quick-tool-row">
-            <span className="text-xs text-slate-500">Velikost textu: {fontScaleLabel(fontScale)}</span>
-            <button
-              className="font-size-button font-size-button-a"
-              type="button"
-              title="Zvětšení písma"
-              aria-label="Zvětšení písma"
-              onClick={onCycleFont}
-            >
-              A
-            </button>
-          </div>
-
-          <div className="quick-tool-row">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-ink">Pamet pacienta</div>
-              <div className="truncate text-xs text-slate-500">{memorySummary}</div>
-            </div>
-            {memoryItems.length > 0 && (
-              <button className="memory-forget" type="button" onClick={onForgetMemory}>
-                Zapomenout
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {memoryItems.length > 0
-              ? memoryItems.map((chip) => <span key={chip} className="memory-chip">{chip}</span>)
-              : <span className="text-xs text-slate-500">Agent si ulozi jen udaje, ktere pacient sam napise do chatu.</span>}
-          </div>
-
-          <div className="quick-tool-row">
-            <div className="min-w-0">
-              <div className="text-xs font-semibold text-ink">Eskalace</div>
-              <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
-            </div>
-            <button
-              className="quick-action"
-              type="button"
-              onClick={() => { void copyEscalation(); }}
-              disabled={!escalationPacket}
-            >
-              {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
-            </button>
-          </div>
+      <div className="tool-row">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-ink">Eskalace</div>
+          <div className="truncate text-xs text-slate-500">{escalationPacket ? "balicek je pripraveny" : "zatim neni potreba"}</div>
         </div>
-      )}
+        <button
+          className="quick-action"
+          type="button"
+          onClick={() => { void copyEscalation(); }}
+          disabled={!escalationPacket}
+        >
+          {copiedEscalation ? "Zkopirovano" : "Kopirovat eskalaci"}
+        </button>
+      </div>
     </section>
   );
 }
@@ -786,15 +783,6 @@ function PendingBubble({ steps }: { steps: AgentStep[] }) {
         <p className="text-sm leading-6 text-slate-600">{running.detail}</p>
       </div>
     </article>
-  );
-}
-
-function StatusChip({ icon, label, ok }: { icon: ReactNode; label: string; ok: boolean }) {
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold ${ok ? "bg-mint/10 text-mint" : "bg-amber/10 text-amber"}`}>
-      {icon}
-      {label}
-    </span>
   );
 }
 

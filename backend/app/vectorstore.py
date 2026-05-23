@@ -16,7 +16,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 
 from xdent_assistant.ingest import build_chunks
 from xdent_assistant.retrieval import source_label
-from xdent_assistant.text import best_sentences
+from xdent_assistant.text import best_sentences, tokenize
 from xdent_assistant.topics import TOPICS, classify_topic, label_for
 
 from .config import Settings
@@ -182,7 +182,7 @@ def search_sources(
     except Exception:
         return []
 
-    docs_with_scores = _dedupe_and_rank(docs_with_scores, limit=top_k, topic_hint=topic_hint)
+    docs_with_scores = _dedupe_and_rank(docs_with_scores, query=query, limit=top_k, topic_hint=topic_hint)
 
     sources: list[Source] = []
     for doc, score in docs_with_scores:
@@ -240,19 +240,72 @@ def _query_variants(query: str, topic_hint: str | None, tolerance: str) -> list[
 def _dedupe_and_rank(
     docs_with_scores: list[tuple[Document, float]],
     *,
+    query: str,
     limit: int,
     topic_hint: str | None,
 ) -> list[tuple[Document, float]]:
     best_by_chunk: dict[str, tuple[Document, float, float]] = {}
+    query_tokens = set(tokenize(query))
+    topic_tokens: set[str] = set()
+    if topic_hint:
+        topic_tokens.update(tokenize(label_for(topic_hint)))
+        for keyword in sorted(TOPICS.get(topic_hint, {}).get("keywords", []))[:12]:
+            topic_tokens.update(tokenize(keyword))
+
     for doc, score in docs_with_scores:
         metadata = doc.metadata
         key = str(metadata.get("chunk_id") or metadata.get("source") or doc.page_content[:80])
-        adjusted_score = score + (0.2 if topic_hint and metadata.get("topic") == topic_hint else 0.0)
+        adjusted_score = _adjusted_relevance_score(
+            doc,
+            score,
+            query_tokens=query_tokens,
+            topic_tokens=topic_tokens,
+            topic_matches=bool(topic_hint and metadata.get("topic") == topic_hint),
+        )
         previous = best_by_chunk.get(key)
         if previous is None or adjusted_score > previous[2]:
             best_by_chunk[key] = (doc, score, adjusted_score)
     ranked = sorted(best_by_chunk.values(), key=lambda item: item[2], reverse=True)[:limit]
     return [(doc, score) for doc, score, _ in ranked]
+
+
+def _adjusted_relevance_score(
+    doc: Document,
+    score: float,
+    *,
+    query_tokens: set[str],
+    topic_tokens: set[str],
+    topic_matches: bool,
+) -> float:
+    metadata = doc.metadata
+    searchable_text = " ".join(
+        str(value or "")
+        for value in (
+            doc.page_content,
+            metadata.get("summary"),
+            metadata.get("intent"),
+            metadata.get("resolution"),
+        )
+    )
+    doc_tokens = set(tokenize(searchable_text))
+    query_overlap = _overlap_ratio(query_tokens, doc_tokens)
+    topic_overlap = _overlap_ratio(topic_tokens, doc_tokens)
+    quality = float(metadata.get("quality") or 0.0)
+
+    return (
+        (float(score) * 0.72)
+        + (0.1 if topic_matches else 0.0)
+        + (query_overlap * 0.24)
+        + (topic_overlap * 0.08)
+        + (quality * 0.08)
+        + (0.04 if metadata.get("resolution") else 0.0)
+    )
+
+
+def _overlap_ratio(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return min(1.0, len(left & right) / max(4, len(left)))
 
 
 def get_stats(settings: Settings) -> StatsResponse:
