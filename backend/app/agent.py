@@ -10,9 +10,19 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from .cache import QueryCache
+from .clinics import assess_urgency, find_nearby_clinics, reserve_earliest_slot
 from .config import Settings
 from .pricing import resolve_chat_prices, resolve_embedding_price
-from .schemas import AgentStep, ChatResponse, Source, UsageEstimate, UserInfo
+from .schemas import (
+    AgentStep,
+    AppointmentProposal,
+    ChatResponse,
+    ClinicOption,
+    Source,
+    TriageResult,
+    UsageEstimate,
+    UserInfo,
+)
 from .topics import classify_topic
 from .utils import append_jsonl, utc_now
 from .vectorstore import search_sources
@@ -68,6 +78,14 @@ def create_escalation_packet_tool(message: str, topic: str, reason: str) -> str:
         f"- Důvod: {reason}\n"
         "- Doplnit: screenshot/chybovou hlášku, účet uživatele, čas výskytu a kroky k reprodukci."
     )
+
+
+@dataclass
+class CareWorkflowResult:
+    triage: TriageResult | None
+    clinics: list[ClinicOption]
+    appointment: AppointmentProposal | None
+    steps: list[AgentStep]
 
 
 @dataclass
@@ -159,6 +177,10 @@ class SupportAgent:
             )
         )
 
+        care_result = self._run_care_workflow(message, user) if self._wants_care_workflow(message, user) else None
+        if care_result:
+            steps.extend(care_result.steps)
+
         if not grounded:
             escalation_packet = create_escalation_packet_tool.invoke(
                 {
@@ -187,6 +209,9 @@ class SupportAgent:
                 answer_status = "warning"
                 answer_detail = f"LLM odpověď se nepodařila, použit bezpečný fallback ze zdrojů: {exc}"
 
+        if care_result:
+            answer = self._append_care_context(answer, care_result)
+
         steps.append(
             AgentStep(
                 id="answer",
@@ -210,6 +235,9 @@ class SupportAgent:
             user=user,
             retrieval_tolerance=retrieval_tolerance,
             usage=self._estimate_usage(message, answer, sources, used_llm),
+            triage=care_result.triage if care_result else None,
+            clinics=care_result.clinics if care_result else [],
+            appointment=care_result.appointment if care_result else None,
         )
         self._log(message, response)
 
@@ -269,6 +297,133 @@ class SupportAgent:
             f"Zdroj: {best.source}"
         ), False
 
+    def _run_care_workflow(self, message: str, user: UserInfo | None) -> CareWorkflowResult:
+        triage = assess_urgency(message, user)
+        city = self._care_location(user)
+        clinics = find_nearby_clinics(city, triage.urgency)
+        appointment = (
+            reserve_earliest_slot(message=message, user=user, triage=triage, clinics=clinics)
+            if self._wants_booking(message, user, triage)
+            else None
+        )
+
+        steps = [
+            AgentStep(
+                id="triage",
+                label="Triazni agent",
+                status="warning" if triage.needs_immediate_care else "done",
+                detail=f"Vyhodnocena urgence: {triage.label}.",
+                payload=triage.model_dump(),
+            ),
+            AgentStep(
+                id="clinics",
+                label="Agent ordinaci",
+                status="done" if clinics else "warning",
+                detail=(
+                    f"Nalezeny {len(clinics)} demo ordinace pobliz: {city or 'bez zadaneho mesta'}."
+                    if clinics
+                    else "Bez zadaneho mesta nelze presne seradit ordinace."
+                ),
+                payload={"clinics": [clinic.model_dump() for clinic in clinics]},
+            ),
+        ]
+        if appointment:
+            steps.append(
+                AgentStep(
+                    id="booking",
+                    label="Rezervacni agent",
+                    status="done" if appointment.status == "pre_reserved" else "warning",
+                    detail=appointment.message,
+                    payload=appointment.model_dump(),
+                )
+            )
+
+        return CareWorkflowResult(
+            triage=triage,
+            clinics=clinics,
+            appointment=appointment,
+            steps=steps,
+        )
+
+    def _append_care_context(self, answer: str, care: CareWorkflowResult) -> str:
+        lines: list[str] = []
+        if care.triage:
+            lines.append(f"Triaz: {care.triage.label} - {care.triage.recommendation}")
+
+        if care.clinics:
+            clinic_parts = []
+            for clinic in care.clinics[:2]:
+                accepting = "prijima nove pacienty" if clinic.accepting_new_patients else "nove pacienty jen po domluve"
+                distance = f", {clinic.distance_km} km" if clinic.distance_km is not None else ""
+                clinic_parts.append(f"{clinic.name} ({clinic.city}{distance}, {accepting}, nejdrive {clinic.earliest_slot})")
+            lines.append("Ordinace pobliz: " + "; ".join(clinic_parts))
+
+        if care.appointment:
+            if care.appointment.status == "pre_reserved":
+                lines.append(
+                    "Predrezervace: "
+                    f"{care.appointment.clinic_name}, {care.appointment.slot_start}, kod {care.appointment.reservation_id}. "
+                    "Recepce musi termin potvrdit."
+                )
+            else:
+                lines.append(f"Termin: {care.appointment.message}")
+
+        if lines:
+            lines.append("Pozn.: ordinace a terminy jsou demo workflow; v ostrem provozu se napoji kalendar XDENT.")
+        return answer.strip() + "\n\n" + "\n".join(lines)
+
+    def _wants_care_workflow(self, message: str, user: UserInfo | None) -> bool:
+        text = message.lower()
+        keywords = (
+            "pacient",
+            "bolest",
+            "akut",
+            "ordinac",
+            "pobliz",
+            "poblíž",
+            "termin",
+            "termín",
+            "objednat",
+            "rezerv",
+            "predobjednat",
+            "předobjednat",
+        )
+        has_patient_context = bool(
+            user
+            and (
+                user.patient_name
+                or user.problem_summary
+                or user.patient_city
+                or user.patient_phone
+                or user.patient_email
+                or (user.urgency and user.urgency != "normal")
+            )
+        )
+        return has_patient_context or any(keyword in text for keyword in keywords)
+
+    def _wants_booking(self, message: str, user: UserInfo | None, triage: TriageResult) -> bool:
+        text = message.lower()
+        booking_keywords = (
+            "termin",
+            "termín",
+            "objednat",
+            "rezerv",
+            "predobjednat",
+            "předobjednat",
+            "nejdrive",
+            "nejdříve",
+        )
+        return (
+            any(keyword in text for keyword in booking_keywords)
+            or triage.urgency in {"high", "critical"}
+            or bool(user and user.problem_summary and (user.patient_phone or user.patient_email or user.contact))
+        )
+
+    def _care_location(self, user: UserInfo | None) -> str | None:
+        if not user:
+            return None
+        return user.patient_city or user.clinic or user.patient_address
+
     def _select_answer_sources(self, sources: list[Source], topic: str | None) -> list[Source]:
         if not sources:
             return []
@@ -301,6 +456,11 @@ class SupportAgent:
             ("kontakt", user.contact),
             ("pacient", user.patient_name),
             ("ID pacienta/karta", user.patient_identifier),
+            ("mesto pacienta", user.patient_city),
+            ("adresa pacienta", user.patient_address),
+            ("telefon pacienta", user.patient_phone),
+            ("e-mail pacienta", user.patient_email),
+            ("preferovany kontakt", user.preferred_contact_method),
             ("věk pacienta", user.patient_age),
             ("urgence", self._urgency_label(user.urgency)),
             ("konkrétní problém", user.problem_summary),
@@ -317,6 +477,10 @@ class SupportAgent:
                 user.patient_name,
                 user.patient_identifier,
                 user.patient_age,
+                user.patient_city,
+                user.patient_address,
+                user.patient_phone,
+                user.patient_email,
                 user.urgency,
                 user.problem_summary,
             )
@@ -396,5 +560,8 @@ class SupportAgent:
                 "retrieval_tolerance": response.retrieval_tolerance,
                 "user": response.user.model_dump() if response.user else None,
                 "usage": response.usage.model_dump() if response.usage else None,
+                "triage": response.triage.model_dump() if response.triage else None,
+                "clinics": [clinic.model_dump() for clinic in response.clinics],
+                "appointment": response.appointment.model_dump() if response.appointment else None,
             },
         )

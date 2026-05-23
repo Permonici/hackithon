@@ -1,19 +1,11 @@
-import type { AgentStep, CacheStats, ChatRequestPayload, ChatResponse, PriceInfoResponse, StatsResponse } from "./types";
+import type { AgentStep, CacheStats, ChatRequestPayload, ChatResponse, StatsResponse } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 
 export async function fetchStats(): Promise<StatsResponse> {
   const response = await fetch(`${API_URL}/stats`);
   if (!response.ok) {
-    throw new Error("Statistiky se nepodařilo načíst.");
-  }
-  return response.json();
-}
-
-export async function fetchPricing(): Promise<PriceInfoResponse> {
-  const response = await fetch(`${API_URL}/pricing`);
-  if (!response.ok) {
-    throw new Error("Ceník se nepodařilo načíst.");
+    throw new Error("Statistiky se nepodarilo nacist.");
   }
   return response.json();
 }
@@ -32,7 +24,7 @@ export async function sendChatStream(
 
   if (!response.ok || !response.body) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || "Stream se nepodařilo spustit.");
+    throw new Error(body.detail || "Stream se nepodarilo spustit.");
   }
 
   const reader = response.body.getReader();
@@ -58,13 +50,13 @@ export async function sendChatStream(
       }
       if (parsed.event === "error") {
         const body = parsed.data as { message?: string; detail?: string };
-        throw new Error(body.message || body.detail || "Backend při odpovědi vrátil chybu.");
+        throw new Error(body.message || body.detail || "Backend pri odpovedi vratil chybu.");
       }
     }
   }
 
   if (!finalResponse) {
-    throw new Error("Stream skončil bez finální odpovědi.");
+    throw new Error("Stream skoncil bez finalni odpovedi.");
   }
   return finalResponse;
 }
@@ -72,7 +64,7 @@ export async function sendChatStream(
 export async function fetchCacheStats(): Promise<CacheStats> {
   const response = await fetch(`${API_URL}/cache/stats`);
   if (!response.ok) {
-    throw new Error("Cache statistiky se nepodařilo načíst.");
+    throw new Error("Cache statistiky se nepodarilo nacist.");
   }
   return response.json();
 }
@@ -81,7 +73,7 @@ export async function ingestData(): Promise<void> {
   const response = await fetch(`${API_URL}/ingest`, { method: "POST" });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || "Indexaci se nepodařilo spustit.");
+    throw new Error(body.detail || "Indexaci se nepodarilo spustit.");
   }
 }
 

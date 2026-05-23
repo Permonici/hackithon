@@ -9,6 +9,11 @@ export type UserInfo = {
   patient_name?: string | null;
   patient_identifier?: string | null;
   patient_age?: string | null;
+  patient_city?: string | null;
+  patient_address?: string | null;
+  patient_phone?: string | null;
+  patient_email?: string | null;
+  preferred_contact_method?: "phone" | "email" | "sms" | "any" | null;
   urgency?: "low" | "normal" | "high" | "critical" | null;
   problem_summary?: string | null;
 };
@@ -43,6 +48,36 @@ export type UsageEstimate = {
   note: string;
 };
 
+export type TriageResult = {
+  urgency: "low" | "normal" | "high" | "critical";
+  label: string;
+  confidence: number;
+  reasons: string[];
+  recommendation: string;
+  needs_immediate_care: boolean;
+};
+
+export type ClinicOption = {
+  name: string;
+  city: string;
+  address: string;
+  distance_km?: number | null;
+  accepting_new_patients: boolean;
+  phone: string;
+  email: string;
+  earliest_slot?: string | null;
+  note: string;
+};
+
+export type AppointmentProposal = {
+  status: "pre_reserved" | "needs_contact" | "unavailable";
+  clinic_name?: string | null;
+  slot_start?: string | null;
+  reservation_id?: string | null;
+  message: string;
+  confirmation_required: boolean;
+};
+
 export type ChatResponse = {
   answer: string;
   topic: string;
@@ -56,6 +91,9 @@ export type ChatResponse = {
   user?: UserInfo | null;
   retrieval_tolerance: RetrievalTolerance;
   usage?: UsageEstimate | null;
+  triage?: TriageResult | null;
+  clinics: ClinicOption[];
+  appointment?: AppointmentProposal | null;
 };
 
 export type ChatMessage = {
@@ -72,17 +110,6 @@ export type StatsResponse = {
   topics: Array<{ topic: string; label: string; chunks: number }>;
   api_ready: boolean;
   qdrant_ready: boolean;
-};
-
-export type PriceInfoResponse = {
-  currency: string;
-  chat_model: string;
-  embedding_model: string;
-  chat_input_price_per_1m: number;
-  chat_output_price_per_1m: number;
-  embedding_price_per_1m: number;
-  note: string;
-  reference_url: string;
 };
 
 export type ChatRequestPayload = {

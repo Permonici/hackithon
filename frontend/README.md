@@ -4,24 +4,24 @@ React + Tailwind konzole pro demonstraci XDENT asistenta.
 
 ## Obrazovky a funkce
 
-- chat pro dotazy zákazníků,
-- lokální chat history,
-- pacientský formulář s urgencí a konkrétním problémem,
-- lokální uložení dat pacienta v prohlížeči,
-- light/dark mode a zvětšení písma,
-- price info tab s orientačním nákladem,
-- režimy tolerance hledání v chuncích,
-- hlasový vstup přes mikrofon,
-- volitelné čtení odpovědí nahlas s mužským/ženským hlasem,
-- rozkliknutí zdrojů přímo u odpovědi,
+- chat pro dotazy zakazniku,
+- lokalni chat history,
+- pacientsky formular s urgenci, kontakty a konkretnim problemem,
+- pacientsky agent pro triaz, ordinace pobliz a demo predrezervaci terminu,
+- lokalni ulozeni dat pacienta v prohlizeci,
+- light/dark mode a zvetseni pisma,
+- rezimy tolerance hledani v chuncich,
+- hlasovy vstup pres mikrofon,
+- volitelne cteni odpovedi nahlas s muzskym nebo zenskym hlasovym profilem,
+- rozkliknuti zdroju primo u odpovedi,
 - realtime agent timeline,
-- evidence cards z transkripcí,
-- coverage témat,
+- evidence cards z transkripci,
+- coverage temat,
 - strict mode,
-- eskalační balíček pro 2. úroveň podpory,
+- eskalacni balicek pro 2. uroven podpory,
 - status OpenAI/Qdrant.
 
-## Lokální spuštění bez Dockeru
+## Lokalni spusteni bez Dockeru
 
 ```powershell
 cd frontend

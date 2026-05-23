@@ -24,7 +24,25 @@ body {
   }
 
   .logo-mark {
-    @apply flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-md bg-ink text-white shadow-sm;
+    @apply relative flex h-12 w-12 shrink-0 flex-col items-center justify-center overflow-hidden rounded-md bg-ink text-white shadow-sm;
+  }
+
+  .logo-mark::after {
+    content: "";
+    position: absolute;
+    inset: auto -10px -18px 10px;
+    height: 34px;
+    transform: rotate(-18deg);
+    border-radius: 999px;
+    background: rgba(30, 157, 115, 0.88);
+  }
+
+  .logo-x {
+    @apply relative z-10 text-2xl font-black leading-5;
+  }
+
+  .logo-dent {
+    @apply relative z-10 mt-0.5 text-[10px] font-black leading-none tracking-wide;
   }
 
   .appearance-controls {
@@ -51,6 +69,10 @@ body {
     @apply inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-mint hover:text-mint disabled:cursor-not-allowed disabled:opacity-40;
   }
 
+  .font-size-button {
+    @apply inline-flex h-8 min-w-9 items-center justify-center rounded-md border border-slate-200 bg-white px-2 text-sm font-black text-slate-600 transition hover:border-mint hover:text-mint disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
   .field-input {
     @apply w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-mint focus:ring-2 focus:ring-mint/20;
   }
@@ -68,7 +90,7 @@ body {
   }
 
   .chat-bubble {
-    @apply max-w-[88%] rounded-md px-4 py-3 shadow-sm md:max-w-[76%];
+    @apply max-w-[94%] rounded-md px-4 py-3 shadow-sm md:max-w-[84%];
   }
 
   .chat-bubble-user {

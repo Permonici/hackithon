@@ -63,9 +63,9 @@ http://localhost:8080
 3. V záložce `Chat` doplňte pacienta/případ, urgenci, konkrétní problém, vyberte toleranci hledání a odešlete dotaz.
 4. V konverzaci sledujte odpověď, zdroje z transkripcí, téma a jistotu.
 5. Záložka `Historie` drží lokální chat history pro demo a zpětné vyhodnocení.
-6. Záložka `Cena` ukazuje orientační náklad poslední odpovědi i celé relace.
+6. Panel `Pacientský agent` vyhodnotí urgenci, ukáže demo ordinace poblíž a připraví předrezervaci nejbližšího termínu.
 
-Poznámka: pokud v `.env` změníte `OPENAI_CHAT_MODEL`, doplňte i odpovídající `OPENAI_CHAT_INPUT_PRICE_PER_1M` a `OPENAI_CHAT_OUTPUT_PRICE_PER_1M`. U neznámého modelu frontend cenu férově označí jako nedoplněnou.
+Poznámka: ordinace a termíny ve frontendu jsou demo workflow. Pro ostré použití se tato vrstva napojí na reálný kalendář XDENT / recepci.
 
 Pokud indexace po předchozí chybě zůstane v divném stavu, vyčistěte Qdrant volume a spusťte aplikaci znovu:
 

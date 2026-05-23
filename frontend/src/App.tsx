@@ -1,44 +1,41 @@
 import {
   Activity,
   AlertTriangle,
+  CalendarCheck,
   CheckCircle2,
   Clock3,
   Copy,
   Database,
-  DollarSign,
   FileSearch,
   Gauge,
   History,
   Loader2,
+  Mail,
+  MapPin,
   MessageSquare,
   Mic,
   MicOff,
-  Minus,
   Moon,
-  Plus,
+  Phone,
   RefreshCw,
   Send,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  Stethoscope,
   Sun,
   Trash2,
-  TrendingUp,
-  Type,
   User,
   Volume2,
   VolumeX,
   Zap
 } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCacheStats, fetchPricing, fetchStats, ingestData, sendChatStream } from "./api";
+import { fetchCacheStats, fetchStats, ingestData, sendChatStream } from "./api";
 import type {
   AgentStep,
   CacheStats,
   ChatMessage,
   ChatResponse,
-  PriceInfoResponse,
   RetrievalTolerance,
   Source,
   StatsResponse,
@@ -68,6 +65,11 @@ const defaultUser: UserInfo = {
   patient_name: "",
   patient_identifier: "",
   patient_age: "",
+  patient_city: "",
+  patient_address: "",
+  patient_phone: "",
+  patient_email: "",
+  preferred_contact_method: "any",
   urgency: "normal",
   problem_summary: ""
 };
@@ -92,7 +94,7 @@ type ThemeMode = "light" | "dark";
 type FontSizeMode = "normal" | "large" | "xlarge";
 
 function App() {
-  const [activeTab, setActiveTab] = useState<"chat" | "history" | "price">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "history">("chat");
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadJson<ThemeMode>(STORAGE_THEME, "light"));
   const [fontSizeMode, setFontSizeMode] = useState<FontSizeMode>(() => loadJson<FontSizeMode>(STORAGE_FONT_SIZE, "normal"));
   const [message, setMessage] = useState(demoQuestions[0]);
@@ -108,7 +110,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [response, setResponse] = useState<ChatResponse | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [pricing, setPricing] = useState<PriceInfoResponse | null>(null);
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
   const [liveSteps, setLiveSteps] = useState<AgentStep[]>(emptySteps);
 
@@ -139,10 +140,6 @@ function App() {
   const sources = visibleResponse?.sources ?? sourcesFromSteps(liveSteps);
   const topScore = Math.max(0, ...sources.map((source) => source.score));
   const fontScaleClass = fontSizeMode === "xlarge" ? "font-xlarge" : fontSizeMode === "large" ? "font-large" : "font-normal";
-  const sessionCost = useMemo(
-    () => messages.reduce((sum, item) => sum + (item.response?.usage?.total_estimated_cost_usd ?? 0), 0),
-    [messages]
-  );
 
   const topicCoverage = useMemo(() => {
     const counts = stats?.topics.map((topic) => topic.chunks) ?? [];
@@ -154,7 +151,7 @@ function App() {
   }, [stats]);
 
   // ── effects ───────────────────────────────────────────────────────────────
-  useEffect(() => { refreshStats(); refreshPricing(); refreshCacheStats(); }, []);
+  useEffect(() => { refreshStats(); refreshCacheStats(); }, []);
 
   useEffect(() => { saveJson(STORAGE_MESSAGES, messages); }, [messages]);
   useEffect(() => { saveJson(STORAGE_USER, userInfo); }, [userInfo]);
@@ -192,10 +189,6 @@ function App() {
   // ── data fetchers ─────────────────────────────────────────────────────────
   async function refreshStats() {
     try { setStats(await fetchStats()); } catch { setStats(null); }
-  }
-
-  async function refreshPricing() {
-    try { setPricing(await fetchPricing()); } catch { setPricing(null); }
   }
 
   async function refreshCacheStats() {
@@ -244,9 +237,10 @@ function App() {
     const cleaned = text.replace(/Zdroj:.*$/m, "").replace(/\[.*?\]/g, "").trim();
     const utterance = new SpeechSynthesisUtterance(cleaned);
     utterance.lang = "cs-CZ";
-    utterance.rate = 1.05;
+    utterance.rate = voiceGender === "female" ? 1.03 : 0.96;
+    utterance.pitch = voiceGender === "female" ? 1.18 : 0.82;
 
-    const czechVoice = selectPreferredVoice(ttsVoices, voiceGender);
+    const czechVoice = selectAssistantVoice(ttsVoices, voiceGender);
     if (czechVoice) utterance.voice = czechVoice;
 
     utterance.onstart = () => setIsSpeaking(true);
@@ -372,10 +366,7 @@ function App() {
       <header className="app-header sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
-            <div className="logo-mark">
-              <Stethoscope size={23} />
-              <span className="text-[11px] font-black tracking-wide">XD</span>
-            </div>
+            <XdentLogo />
             <div>
               <h1 className="text-xl font-semibold">XDENT AI Support</h1>
               <p className="text-sm text-slate-500">Profesionální triáž podpory nad transkripcemi</p>
@@ -385,7 +376,6 @@ function App() {
           <nav className="flex flex-wrap items-center gap-2">
             <TabButton active={activeTab === "chat"} icon={<MessageSquare size={17} />} label="Chat" onClick={() => setActiveTab("chat")} />
             <TabButton active={activeTab === "history"} icon={<History size={17} />} label="Historie" onClick={() => setActiveTab("history")} />
-            <TabButton active={activeTab === "price"} icon={<DollarSign size={17} />} label="Cena & Cache" onClick={() => setActiveTab("price")} />
           </nav>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -409,11 +399,11 @@ function App() {
       </header>
 
       {activeTab === "chat" && (
-        <main className="mx-auto grid max-w-7xl gap-5 px-5 py-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+        <main className="mx-auto grid max-w-[1500px] gap-5 px-5 py-5 xl:grid-cols-[minmax(0,1.85fr)_360px]">
           <section className="space-y-5">
             <IndexBanner stats={stats} isIndexed={isIndexed} indexing={indexing} />
 
-            <section className="panel flex h-[720px] min-h-0 flex-col xl:h-[calc(100vh-178px)] xl:max-h-[840px]">
+            <section className="panel flex h-[760px] min-h-0 flex-col xl:h-[calc(100vh-162px)] xl:max-h-[920px]">
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                 <PanelTitle icon={<MessageSquare size={19} />} title="Konverzace" subtitle={`${messages.length} zpráv v relaci`} />
                 <div className="flex items-center gap-2">
@@ -521,7 +511,7 @@ function App() {
               voiceOutputSupported={voiceOutputSupported}
               voiceOutputEnabled={voiceOutputEnabled}
               voiceGender={voiceGender}
-              selectedVoiceName={selectPreferredVoice(ttsVoices, voiceGender)?.name ?? null}
+              selectedVoiceName={selectAssistantVoice(ttsVoices, voiceGender)?.name ?? null}
               onVoiceOutputChange={setVoiceOutputEnabled}
               onVoiceGenderChange={setVoiceGender}
               isListening={isListening}
@@ -531,6 +521,7 @@ function App() {
               onStopSpeaking={stopSpeaking}
             />
             <AgentPanel steps={steps} loading={loading} />
+            <CarePanel response={visibleResponse} />
             <CoveragePanel topicCoverage={topicCoverage} />
             <EscalationPanel response={visibleResponse} />
           </aside>
@@ -538,15 +529,11 @@ function App() {
       )}
 
       {activeTab === "history" && (
-        <HistoryView messages={messages} onClear={clearHistory} onCopy={copyHistory} sessionId={sessionId} />
-      )}
-
-      {activeTab === "price" && (
-        <PriceView
-          pricing={pricing}
-          response={visibleResponse}
+        <HistoryView
           messages={messages}
-          sessionCost={sessionCost}
+          onClear={clearHistory}
+          onCopy={copyHistory}
+          sessionId={sessionId}
           cacheStats={cacheStats}
           onRefreshCache={refreshCacheStats}
         />
@@ -593,11 +580,20 @@ function IndexBanner({ stats, isIndexed, indexing }: { stats: StatsResponse | nu
   );
 }
 
+function XdentLogo() {
+  return (
+    <div className="logo-mark" aria-label="XDENT">
+      <span className="logo-x">X</span>
+      <span className="logo-dent">DENT</span>
+    </div>
+  );
+}
+
 function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
   return (
     <div className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-5">
       <div className="mb-2 flex items-center gap-2 font-semibold">
-        <Stethoscope size={18} />
+        <Sparkles size={18} />
         Připraveno na dotaz
       </div>
       <p className="text-sm leading-6 text-slate-600">
@@ -712,6 +708,27 @@ function PatientPanel({
         <Input label="Pacient" value={userInfo.patient_name ?? ""} onChange={(value) => update("patient_name", value)} />
         <Input label="Číslo karty / ID" value={userInfo.patient_identifier ?? ""} onChange={(value) => update("patient_identifier", value)} />
         <Input label="Věk / rok narození" value={userInfo.patient_age ?? ""} onChange={(value) => update("patient_age", value)} />
+        <div className="grid gap-3 md:grid-cols-2">
+          <Input label="Mesto pacienta" value={userInfo.patient_city ?? ""} onChange={(value) => update("patient_city", value)} />
+          <Input label="Adresa / oblast" value={userInfo.patient_address ?? ""} onChange={(value) => update("patient_address", value)} />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <Input label="Telefon pacienta" value={userInfo.patient_phone ?? ""} onChange={(value) => update("patient_phone", value)} />
+          <Input label="E-mail pacienta" value={userInfo.patient_email ?? ""} onChange={(value) => update("patient_email", value)} />
+        </div>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Preferovany kontakt</span>
+          <select
+            className="field-input h-10"
+            value={userInfo.preferred_contact_method ?? "any"}
+            onChange={(event) => update("preferred_contact_method", event.target.value)}
+          >
+            <option value="any">Podle dostupnosti</option>
+            <option value="phone">Telefon</option>
+            <option value="sms">SMS</option>
+            <option value="email">E-mail</option>
+          </select>
+        </label>
         <label className="block">
           <span className="mb-1 block text-xs font-medium uppercase text-slate-400">Urgence</span>
           <select className="field-input h-10" value={userInfo.urgency ?? "normal"} onChange={(event) => update("urgency", event.target.value)}>
@@ -918,6 +935,65 @@ function AgentPanel({ steps, loading }: { steps: AgentStep[]; loading: boolean }
   );
 }
 
+function CarePanel({ response }: { response: ChatResponse | null }) {
+  const triage = response?.triage ?? null;
+  const appointment = response?.appointment ?? null;
+  const clinics = response?.clinics ?? [];
+
+  return (
+    <section className="panel">
+      <PanelTitle icon={<CalendarCheck size={19} />} title="Pacientsky agent" subtitle="Triaz, ordinace, termin" />
+      {!triage && clinics.length === 0 && !appointment && (
+        <EmptyState text="Vyplnte problem pacienta nebo se zeptejte na termin." />
+      )}
+      {triage && (
+        <div className={`mb-3 rounded-md border p-3 ${triage.urgency === "critical" ? "border-coral/30 bg-coral/10" : triage.urgency === "high" ? "border-amber/30 bg-amber/10" : "border-mint/30 bg-mint/10"}`}>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold text-ink">{triage.label} urgence</span>
+            <span className="rounded-md bg-white/70 px-2 py-1 text-xs text-slate-600">{Math.round(triage.confidence * 100)} %</span>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{triage.recommendation}</p>
+        </div>
+      )}
+      {appointment && (
+        <div className="mb-3 rounded-md border border-mint/30 bg-mint/10 p-3">
+          <div className="mb-1 text-sm font-semibold text-ink">
+            {appointment.status === "pre_reserved" ? "Predrezervovano" : "Ceka na kontakt"}
+          </div>
+          <div className="text-sm leading-6 text-slate-600">
+            {appointment.clinic_name && <div>{appointment.clinic_name}</div>}
+            {appointment.slot_start && <div>Nejdrive: {appointment.slot_start}</div>}
+            {appointment.reservation_id && <div>Kod: {appointment.reservation_id}</div>}
+            <div>{appointment.message}</div>
+          </div>
+        </div>
+      )}
+      <div className="space-y-2">
+        {clinics.slice(0, 3).map((clinic) => (
+          <article key={clinic.name} className="rounded-md border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-ink">{clinic.name}</div>
+                <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                  <MapPin size={13} /> {clinic.city}{clinic.distance_km !== null && clinic.distance_km !== undefined ? `, ${clinic.distance_km} km` : ""}
+                </div>
+              </div>
+              <span className={`shrink-0 rounded-md px-2 py-1 text-xs ${clinic.accepting_new_patients ? "bg-mint/10 text-mint" : "bg-amber/10 text-amber"}`}>
+                {clinic.accepting_new_patients ? "prijima" : "po domluve"}
+              </span>
+            </div>
+            <div className="space-y-1 text-xs text-slate-500">
+              <div className="flex items-center gap-2"><CalendarCheck size={13} /> {clinic.earliest_slot ?? "termin neni znamy"}</div>
+              <div className="flex items-center gap-2"><Phone size={13} /> {clinic.phone}</div>
+              <div className="flex items-center gap-2"><Mail size={13} /> {clinic.email}</div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function EvidencePanel({
   response,
   loading,
@@ -988,12 +1064,16 @@ function HistoryView({
   messages,
   onClear,
   onCopy,
-  sessionId
+  sessionId,
+  cacheStats,
+  onRefreshCache
 }: {
   messages: ChatMessage[];
   onClear: () => void;
   onCopy: () => void;
   sessionId: string;
+  cacheStats: CacheStats | null;
+  onRefreshCache: () => void;
 }) {
   const answered = messages.filter((item) => item.role === "assistant" && item.response).length;
   return (
@@ -1035,165 +1115,36 @@ function HistoryView({
             </article>
           ))}
         </div>
+
+        <div className="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-ink">Opakovane dotazy</div>
+              <div className="text-xs text-slate-500">Pomaha ladit znalostni vrstvu a odpovedi.</div>
+            </div>
+            <button className="icon-button h-9 w-9" onClick={onRefreshCache} title="Obnovit dotazy">
+              <RefreshCw size={15} />
+            </button>
+          </div>
+          {!cacheStats || cacheStats.top_frequent.length === 0 ? (
+            <EmptyState text="Zatim bez opakovanych dotazu." />
+          ) : (
+            <div className="grid gap-2 md:grid-cols-2">
+              {cacheStats.top_frequent.slice(0, 6).map((item, index) => (
+                <div key={`${item.query}-${index}`} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
+                  <div className="line-clamp-2 text-slate-700">{item.query}</div>
+                  <div className="mt-2 text-xs font-semibold text-mint">{item.count}x</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );
 }
 
-function PriceView({
-  pricing,
-  response,
-  messages,
-  sessionCost,
-  cacheStats,
-  onRefreshCache
-}: {
-  pricing: PriceInfoResponse | null;
-  response: ChatResponse | null;
-  messages: ChatMessage[];
-  sessionCost: number;
-  cacheStats: CacheStats | null;
-  onRefreshCache: () => void;
-}) {
-  const usage = response?.usage ?? null;
-  const chatCost = usage?.estimated_chat_cost_usd ?? 0;
-  const embeddingCost = usage?.estimated_embedding_cost_usd ?? 0;
-  const maxCost = Math.max(chatCost, embeddingCost, 0.000001);
-
-  return (
-    <main className="mx-auto grid max-w-7xl gap-5 px-5 py-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,0.7fr)]">
-      <div className="space-y-5">
-        <section className="panel">
-          <PanelTitle icon={<DollarSign size={19} />} title="Price info" subtitle="Odhad nákladů API" />
-          <div className="grid gap-3 md:grid-cols-3">
-            <Metric label="Chat model" value={pricing?.chat_model ?? "nenačteno"} />
-            <Metric label="Embedding model" value={pricing?.embedding_model ?? "nenačteno"} />
-            <Metric label="Relace" value={formatUsd(sessionCost)} />
-          </div>
-
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <PriceCard label="Input chat" value={pricing ? formatRate(pricing.chat_input_price_per_1m, pricing.currency) : "-"} />
-            <PriceCard label="Output chat" value={pricing ? formatRate(pricing.chat_output_price_per_1m, pricing.currency) : "-"} />
-            <PriceCard label="Embedding" value={pricing ? formatRate(pricing.embedding_price_per_1m, pricing.currency) : "-"} />
-          </div>
-
-          <div className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-            <p>{pricing?.note ?? "Ceny se načítají z backend konfigurace."}</p>
-            {pricing?.reference_url && (
-              <a className="mt-2 inline-flex text-mint underline-offset-4 hover:underline" href={pricing.reference_url} target="_blank" rel="noreferrer">
-                OpenAI pricing
-              </a>
-            )}
-          </div>
-        </section>
-
-        {/* Cache stats */}
-        <section className="panel">
-          <div className="mb-4 flex items-center justify-between">
-            <PanelTitle icon={<TrendingUp size={19} />} title="Cache & časté dotazy" subtitle="Odpovědi servírované z cache" />
-            <button className="icon-button" onClick={onRefreshCache} title="Obnovit">
-              <RefreshCw size={16} />
-            </button>
-          </div>
-
-          <div className="mb-4 grid gap-3 md:grid-cols-2">
-            <Metric label="Aktivní záznamy" value={cacheStats ? `${cacheStats.active_entries}` : "–"} />
-            <Metric label="Sledované dotazy" value={cacheStats ? `${cacheStats.total_tracked_queries}` : "–"} />
-          </div>
-
-          <div>
-            <div className="mb-2 text-xs font-medium uppercase text-slate-400">Nejčastější dotazy</div>
-            {!cacheStats || cacheStats.top_frequent.length === 0
-              ? <EmptyState text="Zatím žádné opakované dotazy." />
-              : (
-                <div className="space-y-2">
-                  {cacheStats.top_frequent.map((item, i) => {
-                    const maxCount = cacheStats.top_frequent[0].count;
-                    return (
-                      <div key={i}>
-                        <div className="mb-1 flex justify-between gap-3 text-xs text-slate-600">
-                          <span className="truncate">{item.query}</span>
-                          <span className="shrink-0 font-medium">{item.count}×</span>
-                        </div>
-                        <div className="h-1.5 rounded-full bg-slate-100">
-                          <div
-                            className="h-1.5 rounded-full bg-mint"
-                            style={{ width: `${Math.max(6, Math.round((item.count / maxCount) * 100))}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-          </div>
-        </section>
-      </div>
-
-      <aside className="space-y-5">
-        <section className="panel">
-          <PanelTitle icon={<Activity size={19} />} title="Poslední odpověď" subtitle="Tokeny a náklad" />
-          {!usage && <EmptyState text="Pošlete dotaz a zobrazí se odhad." />}
-          {usage && (
-            <div className="space-y-4">
-              <Metric label="Celkem" value={formatUsd(usage.total_estimated_cost_usd)} />
-              <CostBar label="Chat" value={chatCost} width={(chatCost / maxCost) * 100} />
-              <CostBar label="Embedding" value={embeddingCost} width={(embeddingCost / maxCost) * 100} />
-              <div className="grid grid-cols-3 gap-2 text-center text-xs text-slate-500">
-                <div className="rounded-md bg-slate-50 p-2">
-                  <strong className="block text-sm text-ink">{usage.estimated_chat_input_tokens}</strong>
-                  input
-                </div>
-                <div className="rounded-md bg-slate-50 p-2">
-                  <strong className="block text-sm text-ink">{usage.estimated_chat_output_tokens}</strong>
-                  output
-                </div>
-                <div className="rounded-md bg-slate-50 p-2">
-                  <strong className="block text-sm text-ink">{usage.estimated_embedding_tokens}</strong>
-                  embed
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className="panel">
-          <PanelTitle icon={<Gauge size={19} />} title="Relace" subtitle="Součet historie" />
-          <div className="space-y-3">
-            {messages.filter((item) => item.response?.usage).length === 0 && <EmptyState text="Zatím bez nákladů." />}
-            {messages
-              .filter((item) => item.response?.usage)
-              .slice(-6)
-              .map((item) => (
-                <CostBar
-                  key={item.id}
-                  label={item.response?.topic_label ?? "odpověď"}
-                  value={item.response?.usage?.total_estimated_cost_usd ?? 0}
-                  width={Math.max(8, ((item.response?.usage?.total_estimated_cost_usd ?? 0) / Math.max(sessionCost, 0.000001)) * 100)}
-                />
-              ))}
-          </div>
-        </section>
-      </aside>
-    </main>
-  );
-}
-
 // ── small shared components ────────────────────────────────────────────────
-
-function CostBar({ label, value, width }: { label: string; value: number; width: number }) {
-  return (
-    <div>
-      <div className="mb-1 flex justify-between gap-3 text-xs text-slate-500">
-        <span className="truncate">{label}</span>
-        <span>{formatUsd(value)}</span>
-      </div>
-      <div className="h-2 rounded-full bg-slate-100">
-        <div className="h-2 rounded-full bg-mint" style={{ width: `${Math.max(4, Math.min(100, width))}%` }} />
-      </div>
-    </div>
-  );
-}
 
 function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
@@ -1214,16 +1165,6 @@ function Metric({ label, value, bar }: { label: string; value: string; bar?: num
           <div className="h-1.5 rounded-full bg-mint" style={{ width: `${Math.max(4, Math.min(100, bar))}%` }} />
         </div>
       )}
-    </div>
-  );
-}
-
-function PriceCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white p-4">
-      <div className="text-xs font-medium uppercase text-slate-400">{label}</div>
-      <div className="mt-2 text-lg font-semibold">{value}</div>
-      <div className="mt-1 text-xs text-slate-500">za 1M tokenů</div>
     </div>
   );
 }
@@ -1252,25 +1193,24 @@ function AppearanceControls({
         {themeMode === "dark" ? <Sun size={18} /> : <Moon size={18} />}
       </button>
       <div className="flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1">
-        <Type size={16} className="mx-1 text-slate-500" />
         <button
-          className="icon-button h-8 w-8"
+          className="font-size-button"
           onClick={() => onFontSizeModeChange(fontModes[Math.max(0, currentIndex - 1)])}
           title="Zmenšit písmo"
           disabled={currentIndex === 0}
         >
-          <Minus size={15} />
+          A-
         </button>
         <span className="min-w-12 text-center text-xs font-semibold text-slate-500">
           {fontSizeMode === "normal" ? "100%" : fontSizeMode === "large" ? "115%" : "130%"}
         </span>
         <button
-          className="icon-button h-8 w-8"
+          className="font-size-button text-base"
           onClick={() => onFontSizeModeChange(fontModes[Math.min(fontModes.length - 1, currentIndex + 1)])}
           title="Zvětšit písmo"
           disabled={currentIndex === fontModes.length - 1}
         >
-          <Plus size={15} />
+          A+
         </button>
       </div>
     </div>
@@ -1372,6 +1312,10 @@ function compactUser(user: UserInfo): UserInfo | null {
     trimOrUndefined(user.patient_name) ||
     trimOrUndefined(user.patient_identifier) ||
     trimOrUndefined(user.patient_age) ||
+    trimOrUndefined(user.patient_city) ||
+    trimOrUndefined(user.patient_address) ||
+    trimOrUndefined(user.patient_phone) ||
+    trimOrUndefined(user.patient_email) ||
     trimOrUndefined(user.problem_summary) ||
     (user.urgency && user.urgency !== "normal")
   );
@@ -1384,6 +1328,11 @@ function compactUser(user: UserInfo): UserInfo | null {
     patient_name: trimOrUndefined(user.patient_name),
     patient_identifier: trimOrUndefined(user.patient_identifier),
     patient_age: trimOrUndefined(user.patient_age),
+    patient_city: trimOrUndefined(user.patient_city),
+    patient_address: trimOrUndefined(user.patient_address),
+    patient_phone: trimOrUndefined(user.patient_phone),
+    patient_email: trimOrUndefined(user.patient_email),
+    preferred_contact_method: hasCaseData ? (user.preferred_contact_method ?? "any") : undefined,
     urgency: hasCaseData ? (user.urgency ?? "normal") : undefined,
     problem_summary: trimOrUndefined(user.problem_summary)
   };
@@ -1435,36 +1384,25 @@ function formatTime(value: string): string {
   return new Date(value).toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
 }
 
-function formatUsd(value: number): string {
-  if (value < 0.0001) return `$${value.toFixed(8)}`;
-  return `$${value.toFixed(4)}`;
-}
-
-function formatRate(value: number, currency: string): string {
-  return value > 0 ? `${value} ${currency}` : "doplnit";
-}
-
-function selectPreferredVoice(voices: SpeechSynthesisVoice[], gender: VoiceGender): SpeechSynthesisVoice | null {
-  const czechVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("cs"));
-  const candidates = czechVoices.length > 0 ? czechVoices : voices;
-  const hints =
-    gender === "female"
-      ? ["female", "woman", "zena", "žena", "zuzana", "vlasta", "iveta", "tereza"]
-      : ["male", "man", "muz", "muž", "jakub", "antonin", "petr", "ondrej"];
-
-  const hinted = candidates.find((voice) => {
-    const name = normalizeVoiceName(voice.name);
-    return hints.some((hint) => name.includes(normalizeVoiceName(hint)));
-  });
-
-  return hinted ?? czechVoices[0] ?? voices[0] ?? null;
-}
-
 function normalizeVoiceName(value: string): string {
   return value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function selectAssistantVoice(voices: SpeechSynthesisVoice[], gender: VoiceGender): SpeechSynthesisVoice | null {
+  const czechVoices = voices.filter((voice) => voice.lang.toLowerCase().startsWith("cs"));
+  const candidates = czechVoices.length > 0 ? czechVoices : voices;
+  const hints =
+    gender === "female"
+      ? ["female", "woman", "zena", "vlasta", "zuzana", "tereza", "iveta", "helena", "jitka", "sara", "katerina"]
+      : ["male", "man", "muz", "jakub", "antonin", "petr", "ondrej", "michal", "jan"];
+  const hinted = candidates.find((voice) => {
+    const name = normalizeVoiceName(`${voice.name} ${voice.voiceURI}`);
+    return hints.some((hint) => name.includes(normalizeVoiceName(hint)));
+  });
+  return hinted ?? czechVoices[0] ?? voices[0] ?? null;
 }
 
 function toleranceName(value: RetrievalTolerance): string {

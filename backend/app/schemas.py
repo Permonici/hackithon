@@ -14,6 +14,11 @@ class UserInfo(BaseModel):
     patient_name: str | None = Field(default=None, max_length=120)
     patient_identifier: str | None = Field(default=None, max_length=120)
     patient_age: str | None = Field(default=None, max_length=40)
+    patient_city: str | None = Field(default=None, max_length=120)
+    patient_address: str | None = Field(default=None, max_length=220)
+    patient_phone: str | None = Field(default=None, max_length=80)
+    patient_email: str | None = Field(default=None, max_length=160)
+    preferred_contact_method: Literal["phone", "email", "sms", "any"] | None = "any"
     urgency: Literal["low", "normal", "high", "critical"] | None = None
     problem_summary: str | None = Field(default=None, max_length=1200)
 
@@ -57,6 +62,36 @@ class UsageEstimate(BaseModel):
     note: str
 
 
+class TriageResult(BaseModel):
+    urgency: Literal["low", "normal", "high", "critical"]
+    label: str
+    confidence: float
+    reasons: list[str]
+    recommendation: str
+    needs_immediate_care: bool = False
+
+
+class ClinicOption(BaseModel):
+    name: str
+    city: str
+    address: str
+    distance_km: float | None = None
+    accepting_new_patients: bool
+    phone: str
+    email: str
+    earliest_slot: str | None = None
+    note: str
+
+
+class AppointmentProposal(BaseModel):
+    status: Literal["pre_reserved", "needs_contact", "unavailable"]
+    clinic_name: str | None = None
+    slot_start: str | None = None
+    reservation_id: str | None = None
+    message: str
+    confirmation_required: bool = True
+
+
 class ChatResponse(BaseModel):
     answer: str
     topic: str
@@ -70,6 +105,9 @@ class ChatResponse(BaseModel):
     user: UserInfo | None = None
     retrieval_tolerance: Literal["strict", "balanced", "broad"] = "balanced"
     usage: UsageEstimate | None = None
+    triage: TriageResult | None = None
+    clinics: list[ClinicOption] = Field(default_factory=list)
+    appointment: AppointmentProposal | None = None
 
 
 class PriceInfoResponse(BaseModel):
