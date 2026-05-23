@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+import threading
+import time
 from collections import Counter
 from functools import lru_cache
 from typing import Any
@@ -20,6 +22,11 @@ from xdent_assistant.topics import TOPICS, classify_topic, label_for
 from .config import Settings
 from .schemas import IngestResponse, Source, StatsResponse
 from .utils import compact_text
+
+
+STATS_CACHE_TTL_SECONDS = 60.0
+_stats_cache_lock = threading.Lock()
+_stats_cache: dict[tuple[str, str, bool], tuple[float, StatsResponse]] = {}
 
 
 @lru_cache(maxsize=4)
@@ -51,6 +58,11 @@ def build_vector_store(settings: Settings) -> QdrantVectorStore:
         collection_name=settings.qdrant_collection,
         url=settings.qdrant_url,
     )
+
+
+def clear_stats_cache() -> None:
+    with _stats_cache_lock:
+        _stats_cache.clear()
 
 
 def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestResponse:
@@ -101,6 +113,7 @@ def ingest_transcripts(settings: Settings, *, recreate: bool = True) -> IngestRe
         force_recreate=recreate,
     )
     get_qdrant_client.cache_clear()
+    clear_stats_cache()
 
     return IngestResponse(
         collection=settings.qdrant_collection,
@@ -220,6 +233,13 @@ def _dedupe_and_rank(
 
 
 def get_stats(settings: Settings) -> StatsResponse:
+    cache_key = (settings.qdrant_url, settings.qdrant_collection, bool(settings.openai_api_key))
+    now = time.monotonic()
+    with _stats_cache_lock:
+        cached = _stats_cache.get(cache_key)
+        if cached and now - cached[0] < STATS_CACHE_TTL_SECONDS:
+            return cached[1]
+
     client = get_qdrant_client(settings.qdrant_url)
     qdrant_ready = True
     points_count = 0
@@ -227,17 +247,17 @@ def get_stats(settings: Settings) -> StatsResponse:
     try:
         collection_info = client.get_collection(settings.qdrant_collection)
         points_count = int(collection_info.points_count or 0)
-        points, _ = client.scroll(
-            settings.qdrant_collection,
-            limit=10000,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for point in points:
-            payload = point.payload or {}
-            metadata = payload.get("metadata") or {}
-            topic = metadata.get("topic") or "unknown"
-            topic_counts[topic] += 1
+        for topic in TOPICS:
+            count_result = client.count(
+                settings.qdrant_collection,
+                count_filter=_topic_filter(topic),
+                exact=True,
+            )
+            if count_result.count:
+                topic_counts[topic] = int(count_result.count)
+        unknown_count = max(0, points_count - sum(topic_counts.values()))
+        if unknown_count:
+            topic_counts["unknown"] = unknown_count
     except Exception:
         try:
             client.get_collections()
@@ -249,13 +269,16 @@ def get_stats(settings: Settings) -> StatsResponse:
         {"topic": topic, "label": label_for(topic), "chunks": count}
         for topic, count in topic_counts.most_common()
     ]
-    return StatsResponse(
+    response = StatsResponse(
         collection=settings.qdrant_collection,
         points_count=points_count,
         topics=topics,
         api_ready=bool(settings.openai_api_key),
         qdrant_ready=qdrant_ready,
     )
+    with _stats_cache_lock:
+        _stats_cache[cache_key] = (time.monotonic(), response)
+    return response
 
 
 def qdrant_collection_exists(settings: Settings) -> bool:

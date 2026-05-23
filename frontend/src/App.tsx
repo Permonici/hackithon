@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Bot,
   Calendar,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   Copy,
   Database,
@@ -471,21 +473,56 @@ function WelcomeBlock({ voiceOutputEnabled }: { voiceOutputEnabled: boolean }) {
 }
 
 function AgentSwitcher({ selected, onSelect }: { selected: AgentMode; onSelect: (mode: AgentMode) => void }) {
+  const [expanded, setExpanded] = useState(false);
   const active = agentOptions.find((agent) => agent.id === selected) ?? agentOptions[0];
 
   return (
     <div className="agent-handoff-wrap">
-      <div className="agent-handoff-panel">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="agent-handoff-icon">{active.icon}</div>
-          <div className="min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Ted odpovida</div>
-            <div className="truncate text-sm font-semibold text-ink">{active.label}</div>
-            <div className="truncate text-xs text-slate-500">
-              {selected === "auto" ? "AI si sama vybere nejvhodnejsiho pomocnika" : active.hint}
-            </div>
+      <button
+        className="agent-handoff-compact"
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+      >
+        <span className="agent-handoff-icon">{active.icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="agent-kicker">AI pomocnik</span>
+          <span className="agent-title">{active.label}</span>
+          <span className="agent-subtitle">
+            {selected === "auto" ? "AI sama vybere nejvhodnejsi postup" : active.hint}
+          </span>
+        </span>
+        <span className="agent-handoff-toggle">
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </span>
+      </button>
+      {expanded && (
+        <div className="agent-handoff-expanded">
+          <p className="agent-handoff-summary">
+            Prepnete jen tehdy, kdyz chcete AI nasmerovat na konkretni typ pomoci.
+          </p>
+          <div className="agent-preset-grid">
+            {agentOptions.map((agent) => (
+              <button
+                key={agent.id}
+                className={`agent-preset ${agent.id === selected ? "agent-preset-active" : ""}`}
+                type="button"
+                onClick={() => {
+                  onSelect(agent.id);
+                  setExpanded(false);
+                }}
+              >
+                <span>{agent.icon}</span>
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold">{agent.label}</span>
+                  <span className="block truncate text-[11px] font-medium text-slate-400">{agent.hint}</span>
+                </span>
+              </button>
+            ))}
           </div>
         </div>
+      )}
+      <div className="sr-only">
         <label className="agent-select-label">
           Zmenit pomocnika
           <select className="agent-select" value={selected} onChange={(event) => onSelect(event.target.value as AgentMode)}>

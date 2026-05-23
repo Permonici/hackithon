@@ -230,12 +230,48 @@ body {
     @apply border-b border-slate-200 bg-white px-4 py-2;
   }
 
-  .agent-handoff-panel {
-    @apply flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 p-2.5;
+  .agent-handoff-compact {
+    @apply flex w-full items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left transition hover:border-mint/50 hover:bg-mint/5;
   }
 
   .agent-handoff-icon {
     @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-mint/10 text-mint;
+  }
+
+  .agent-kicker {
+    @apply block text-[10px] font-bold uppercase tracking-wide text-slate-400;
+  }
+
+  .agent-title {
+    @apply block truncate text-sm font-semibold text-ink;
+  }
+
+  .agent-subtitle {
+    @apply block truncate text-xs text-slate-500;
+  }
+
+  .agent-handoff-toggle {
+    @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-slate-500 shadow-sm;
+  }
+
+  .agent-handoff-expanded {
+    @apply mt-2 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3;
+  }
+
+  .agent-handoff-summary {
+    @apply text-xs leading-5 text-slate-500;
+  }
+
+  .agent-preset-grid {
+    @apply grid grid-cols-2 gap-2;
+  }
+
+  .agent-preset {
+    @apply flex min-w-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-left text-xs text-slate-600 transition hover:border-mint hover:text-mint;
+  }
+
+  .agent-preset-active {
+    @apply border-mint bg-mint/10 text-mint;
   }
 
   .agent-select-label {
@@ -326,8 +362,8 @@ body {
       @apply max-w-[99%] px-4 py-4;
     }
 
-    .agent-handoff-panel {
-      @apply grid;
+    .agent-preset-grid {
+      @apply grid-cols-1;
     }
 
     .agent-select-label {
@@ -473,10 +509,18 @@ body {
 .dark .agent-switch-wrap,
 .dark .agent-switch,
 .dark .agent-handoff-wrap,
-.dark .agent-handoff-panel,
+.dark .agent-handoff-compact,
+.dark .agent-handoff-expanded,
 .dark .memory-strip {
   background: #111827;
   border-color: #263247;
+}
+
+.dark .agent-handoff-toggle,
+.dark .agent-preset {
+  background: #0f172a;
+  border-color: #334155;
+  color: #e2e8f0;
 }
 
 .dark .agent-select {

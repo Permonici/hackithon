@@ -245,19 +245,26 @@ class SupportAgent:
                 sources = broad_selected
                 best_score = broad_best_score
                 retrieval_fallback_used = True
+        effective_retrieval_tolerance = "broad" if retrieval_fallback_used else retrieval_tolerance
+        min_score = self._min_score(strict_mode, effective_retrieval_tolerance)
+        retrieval_detail = (
+            f"Nalezeno {len(retrieved_sources)} relevantnich casti hovoru, "
+            f"pro odpoved pouzito {len(sources)} zdroju "
+            f"({self._tolerance_label(effective_retrieval_tolerance)} hledani)."
+        )
+        if retrieval_fallback_used:
+            retrieval_detail += " AI rozsiril hledani, protoze prvni shoda byla slaba."
         steps.append(
             AgentStep(
                 id="retrieve",
                 label="Vyhledání v transkripcích",
                 status="done" if sources else "warning",
-                detail=(
-                    f"Nalezeno {len(retrieved_sources)} relevantních částí hovorů, "
-                    f"pro odpověď použito {len(sources)} zdrojů "
-                    f"({self._tolerance_label(retrieval_tolerance)} hledání)."
-                ),
+                detail=retrieval_detail,
                 payload={
                     "top_score": best_score,
                     "tolerance": retrieval_tolerance,
+                    "effective_tolerance": effective_retrieval_tolerance,
+                    "detail": retrieval_detail,
                     "fallback_used": retrieval_fallback_used,
                     "sources": [source.model_dump() for source in sources[:3]],
                 },
