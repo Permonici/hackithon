@@ -739,30 +739,39 @@ function ChatBubble({ message }: { message: ChatMessage }) {
                 <span className="font-semibold">Proc odpovida tento pomocnik:</span> {message.response.agent_route_reason ?? "AI vybrala nejvhodnejsiho pomocnika."}
               </div>
             )}
-            <div className="rounded-md bg-white/70 p-2 text-slate-600">
-              <div className="mb-1 flex items-center justify-between">
-                <span>Jistota odpovedi</span>
-                <span className="font-semibold text-ink">{answerConfidence}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-slate-200">
-                <div className="h-1.5 rounded-full bg-ocean" style={{ width: `${answerConfidence}%` }} />
-              </div>
-            </div>
-            <div className="rounded-md bg-white/70 p-2 text-slate-600">
-              <div className="mb-1 flex items-center justify-between">
-                <span>Sila podkladu</span>
-                <span className="font-semibold text-ink">{sourceStrength}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-slate-200">
-                <div className="h-1.5 rounded-full bg-mint" style={{ width: `${sourceStrength}%` }} />
-              </div>
-            </div>
+            <MetricBar label="Jistota odpovedi" value={answerConfidence} tone="confidence" />
+            <MetricBar label="Sila podkladu" value={sourceStrength} tone="source" />
             <SourceDisclosure sources={message.response.sources} />
             {message.response.escalation_packet && <EscalationDisclosure packet={message.response.escalation_packet} />}
           </div>
         )}
       </div>
     </article>
+  );
+}
+
+function MetricBar({ label, value, tone }: { label: string; value: number; tone: "confidence" | "source" }) {
+  const safeValue = Math.max(0, Math.min(100, value));
+  return (
+    <div className="metric-card">
+      <div className="mb-1.5 flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <span className="font-semibold text-ink">{safeValue}%</span>
+      </div>
+      <div
+        className="metric-track"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={safeValue}
+      >
+        <div
+          className={`metric-fill ${tone === "confidence" ? "metric-fill-confidence" : "metric-fill-source"}`}
+          style={{ width: `${safeValue}%` }}
+        />
+      </div>
+    </div>
   );
 }
 

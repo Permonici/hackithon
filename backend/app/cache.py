@@ -10,7 +10,7 @@ from typing import Any
 MAX_CACHE_SIZE = 200
 DEFAULT_TTL = 7_200       # 2 hours
 FREQUENT_THRESHOLD = 3    # queries seen this many times are persisted to disk
-CACHE_VERSION = "rag-v3"
+CACHE_VERSION = "rag-v4"
 
 
 class QueryCache:

@@ -221,6 +221,27 @@ body {
     @apply rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-coral transition hover:border-coral/50;
   }
 
+  .metric-card {
+    @apply rounded-md border border-slate-200 bg-white/80 p-2 text-slate-600;
+  }
+
+  .metric-track {
+    @apply h-2 overflow-hidden rounded-full bg-slate-200;
+  }
+
+  .metric-fill {
+    @apply h-2 rounded-full transition-all duration-500 ease-out;
+  }
+
+  .metric-fill-confidence {
+    background: linear-gradient(90deg, #1e9d73 0%, #31c48d 100%);
+    box-shadow: 0 0 0 1px rgba(30, 157, 115, 0.12), 0 0 12px rgba(30, 157, 115, 0.24);
+  }
+
+  .metric-fill-source {
+    background: #1e9d73;
+  }
+
   .quick-strip {
     @apply border-t border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600;
   }
@@ -498,4 +519,13 @@ body {
   background-color: #0f172a;
   border-color: #334155;
   color: #e2e8f0;
+}
+
+.dark .metric-card {
+  background-color: rgba(15, 23, 42, 0.82);
+  border-color: #334155;
+}
+
+.dark .metric-track {
+  background-color: #263247;
 }

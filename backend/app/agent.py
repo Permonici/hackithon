@@ -10,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from xdent_assistant.models import TopicResult
+from xdent_assistant.text import best_sentences, tokenize
 
 from .cache import QueryCache
 from .clinics import assess_urgency, find_nearby_clinics, reserve_earliest_slot
@@ -39,6 +40,53 @@ def _get_llm(model: str, api_key: str) -> ChatOpenAI:
 # Module-level cache singleton – initialised lazily on first use.
 _agent_cache: QueryCache | None = None
 _cache_init_lock = threading.Lock()
+
+
+SOURCE_ACTION_TERMS = (
+    "zkontrol",
+    "nastav",
+    "nastaven",
+    "uloz",
+    "odes",
+    "odeslat",
+    "vypln",
+    "zmen",
+    "prid",
+    "aktualiz",
+    "certifikat",
+    "prihlas",
+    "tisk",
+    "sablon",
+    "diagno",
+    "uhrad",
+    "schval",
+    "restart",
+    "instal",
+    "over",
+)
+
+WEAK_RESOLUTION_TERMS = (
+    "podivam",
+    "mrknu",
+    "zkontroluju",
+    "zkusim",
+    "pripojte",
+    "kouknu",
+    "nevim",
+    "uvidime",
+)
+
+GENERIC_QUERY_TERMS = {
+    "xdent",
+    "program",
+    "problem",
+    "nejd",
+    "nefunguj",
+    "mam",
+    "prosim",
+    "dotaz",
+    "chyba",
+}
 
 
 def get_agent_cache(settings: Settings) -> QueryCache:
@@ -117,6 +165,15 @@ class CareWorkflowResult:
     clinics: list[ClinicOption]
     appointment: AppointmentProposal | None
     steps: list[AgentStep]
+
+
+@dataclass(frozen=True)
+class EvidenceAssessment:
+    grounded: bool
+    detail: str
+    actionability: float
+    agreement: float
+    query_alignment: float
 
 
 @dataclass
@@ -247,6 +304,8 @@ class SupportAgent:
                 retrieval_fallback_used = True
         effective_retrieval_tolerance = "broad" if retrieval_fallback_used else retrieval_tolerance
         min_score = self._min_score(strict_mode, effective_retrieval_tolerance)
+        sources = self._prune_answer_sources(sources, min_score)
+        best_score = max((source.score for source in sources), default=0.0)
         retrieval_detail = (
             f"Nalezeno {len(retrieved_sources)} relevantnich casti hovoru, "
             f"pro odpoved pouzito {len(sources)} zdroju "
@@ -271,7 +330,8 @@ class SupportAgent:
             )
         )
 
-        grounded = bool(sources) and best_score >= min_score
+        evidence = self._assess_evidence(message, sources, classified.topic, best_score, min_score)
+        grounded = evidence.grounded
         steps.append(
             AgentStep(
                 id="validate",
@@ -285,11 +345,19 @@ class SupportAgent:
                 payload={
                     "min_score": min_score,
                     "best_score": best_score,
+                    "actionability": evidence.actionability,
+                    "source_agreement": evidence.agreement,
+                    "query_alignment": evidence.query_alignment,
                     "strict_mode": strict_mode,
                     "tolerance": retrieval_tolerance,
                 },
             )
         )
+        steps[-1].detail = evidence.detail
+        if not grounded and evidence.query_alignment < 0.30:
+            classified = TopicResult(topic=None, label="Nejiste tema", confidence=0.0)
+            sources = []
+            best_score = 0.0
 
         wants_care = agent_mode in {"patient", "triage", "scheduler", "handoff"} or self._wants_care_workflow(message, effective_user)
         care_result = self._run_care_workflow(message, effective_user, force_booking=agent_mode == "scheduler") if wants_care else None
@@ -316,10 +384,11 @@ class SupportAgent:
             answer_status = "done"
             answer_detail = f"{profile['label']} sestavil kratky dalsi krok bez zbytecneho LLM volani."
         elif not grounded:
+            fallback_topic_label = classified.label if evidence.query_alignment >= 0.30 else "Nejiste tema"
             escalation_packet = create_escalation_packet_tool.invoke(
                 {
                     "message": message,
-                    "topic": classified.label,
+                    "topic": fallback_topic_label,
                     "reason": "Nízká shoda v transkripcích nebo chybějící ověřený postup.",
                 }
             )
@@ -338,7 +407,7 @@ class SupportAgent:
                 answer_status = "done"
                 answer_detail = "Odpověď je krátká, opřená o zdroje a připravená pro chat."
             except Exception as exc:
-                answer, used_llm = self._fallback_answer(classified.label, sources)
+                answer, used_llm = self._fallback_answer(classified.label, sources, message)
                 answer_status = "warning"
                 answer_detail = f"LLM odpověď se nepodařila, použit bezpečný fallback ze zdrojů: {exc}"
 
@@ -413,7 +482,7 @@ class SupportAgent:
         agent_instruction: str,
     ) -> tuple[str, bool]:
         if not self.settings.openai_api_key:
-            return self._fallback_answer(topic_label, sources)
+            return self._fallback_answer(topic_label, sources, message)
 
         llm = _get_llm(self.settings.openai_chat_model, self.settings.openai_api_key)
         prompt = ChatPromptTemplate.from_messages(
@@ -426,6 +495,11 @@ class SupportAgent:
                     "Téma: {topic}\n"
                     "Dotaz zákazníka: {message}\n\n"
                     "Zdroje:\n{sources}\n\n"
+                    "Interni kontrola pred odpovedi, nevypisuj ji:\n"
+                    "- pojmenuj konkretni problem uzivatele;\n"
+                    "- pouzij jen zdroje, ktere resi stejny problem;\n"
+                    "- pokud zdroj nerika overeny postup, napis ze konkretni postup neni v podkladech;\n"
+                    "- neslibuj hotovou opravu, pokud zdroje obsahuji jen predani nebo vzdalenou kontrolu.\n\n"
                     "Odpověz maximálně 3 krátkými větami. Neopakuj celý úryvek, vytáhni jen smysluplný postup.",
                 ),
             ]
@@ -441,19 +515,40 @@ class SupportAgent:
         )
         return str(result.content).strip(), True
 
-    def _fallback_answer(self, topic_label: str, sources: list[Source]) -> tuple[str, bool]:
+    def _fallback_answer(self, topic_label: str, sources: list[Source], message: str | None = None) -> tuple[str, bool]:
         if not sources:
             return (
                 f"Téma: {topic_label}.\n"
                 "V dostupných transkripcích k tomu nemám dost jistý podklad. Předejte dotaz podpoře."
             ), False
 
-        best = sources[0]
-        resolution = best.resolution or best.summary or best.excerpt
+        resolution = self._best_supported_sentence(message or topic_label, sources)
+        if not resolution:
+            return (
+                f"Tema: {topic_label}.\n"
+                "Nasel jsem podobny pripad, ale podklady neobsahuji jasny overeny postup. "
+                "Predejte dotaz podpore se screenshotem nebo presnou chybovou hlaskou."
+            ), False
         return (
             f"Téma: {topic_label}.\n"
             f"Podle dostupných hovorů: {resolution}"
         ), False
+
+    def _best_supported_sentence(self, query: str, sources: list[Source]) -> str | None:
+        texts: list[str] = []
+        for source in sources[:3]:
+            for value in (source.resolution, source.summary, source.intent, source.excerpt):
+                if value and not self._is_weak_resolution(value):
+                    texts.append(value)
+        if not texts:
+            return None
+
+        query_with_intent = f"{query} postup reseni zkontrolovat nastavit odeslat chyba"
+        sentences = best_sentences(query_with_intent, texts, limit=3)
+        for sentence in sentences:
+            if not self._is_weak_resolution(sentence):
+                return sentence
+        return None
 
     def _run_care_workflow(self, message: str, user: UserInfo | None, *, force_booking: bool = False) -> CareWorkflowResult:
         triage = assess_urgency(message, user)
@@ -849,6 +944,126 @@ class SupportAgent:
                 return value.strip()
         return None
 
+    def _assess_evidence(
+        self,
+        query: str,
+        sources: list[Source],
+        topic: str | None,
+        best_score: float,
+        min_score: float,
+    ) -> EvidenceAssessment:
+        if not sources:
+            return EvidenceAssessment(
+                grounded=False,
+                detail="Nenasel jsem dostatecny zdroj v transkripcich, proto volim bezpecny fallback.",
+                actionability=0.0,
+                agreement=0.0,
+                query_alignment=0.0,
+            )
+
+        actionability = self._source_actionability(sources)
+        agreement = self._source_agreement(sources, topic)
+        query_alignment = self._source_query_alignment(query, sources)
+        score_ok = best_score >= min_score
+        action_ok = actionability >= 0.22 or best_score >= max(0.58, min_score * 2.4)
+        agreement_ok = agreement >= 0.5
+        alignment_ok = query_alignment >= 0.30
+        grounded = score_ok and action_ok and agreement_ok and alignment_ok
+        if grounded:
+            detail = (
+                f"Kontext staci pro odpoved: shoda zdroju {round(agreement * 100)} %, "
+                f"pouzitelnost postupu {round(actionability * 100)} %, "
+                f"shoda s dotazem {round(query_alignment * 100)} %."
+            )
+        elif not score_ok:
+            detail = "Nejlepsi zdroj je pod hranici jistoty, aktivuji bezpecny fallback."
+        elif not alignment_ok:
+            detail = "Nalezene zdroje se malo prekryvaji s dotazem, proto nebudu hadat odpoved."
+        elif not agreement_ok:
+            detail = "Zdroje se neshoduji na tematu, odpoved bude predana podpore."
+        else:
+            detail = "Zdroje jsou podobne, ale neobsahuji dost jasny postup; odpoved bude opatrna."
+
+        return EvidenceAssessment(
+            grounded=grounded,
+            detail=detail,
+            actionability=round(actionability, 3),
+            agreement=round(agreement, 3),
+            query_alignment=round(query_alignment, 3),
+        )
+
+    def _source_agreement(self, sources: list[Source], topic: str | None) -> float:
+        if not sources:
+            return 0.0
+        if not topic:
+            return 0.65
+        matching = sum(1 for source in sources if source.topic == topic)
+        return matching / len(sources)
+
+    def _source_query_alignment(self, query: str, sources: list[Source]) -> float:
+        query_tokens = [token for token in tokenize(query) if token not in GENERIC_QUERY_TERMS]
+        if not query_tokens:
+            query_tokens = tokenize(query)
+        if not query_tokens:
+            return 0.0
+
+        query_set = set(query_tokens)
+        best = 0.0
+        for source in sources[:4]:
+            source_text = " ".join(
+                part
+                for part in (source.resolution, source.summary, source.intent, source.excerpt)
+                if part
+            )
+            source_tokens = set(tokenize(source_text))
+            if not source_tokens:
+                continue
+            overlap = len(query_set & source_tokens)
+            best = max(best, overlap / max(3, len(query_set)))
+        return min(best, 1.0)
+
+    def _source_actionability(self, sources: list[Source]) -> float:
+        best = 0.0
+        for source in sources[:4]:
+            text = self._plain(
+                " ".join(
+                    part
+                    for part in (
+                        source.resolution,
+                        source.summary,
+                        source.intent,
+                        source.excerpt[:700],
+                    )
+                    if part
+                )
+            )
+            if not text:
+                continue
+            hit_count = sum(1 for term in SOURCE_ACTION_TERMS if term in text)
+            has_resolution = bool(source.resolution and not self._is_weak_resolution(source.resolution))
+            score = min(max(float(source.score), 0.0), 1.0) * 0.22
+            score += min(hit_count * 0.08, 0.42)
+            if has_resolution:
+                score += 0.32
+            if source.summary:
+                score += 0.08
+            if self._is_weak_resolution(source.resolution or "") and hit_count <= 1:
+                score *= 0.55
+            best = max(best, min(score, 1.0))
+        return best
+
+    def _is_weak_resolution(self, value: str) -> bool:
+        text = self._plain(value)
+        return bool(text and len(text) < 140 and any(term in text for term in WEAK_RESOLUTION_TERMS))
+
+    def _prune_answer_sources(self, sources: list[Source], min_score: float) -> list[Source]:
+        if not sources:
+            return []
+        best_score = max(float(source.score) for source in sources)
+        floor = max(min_score * 0.65, best_score * 0.35)
+        selected = [source for source in sources if float(source.score) >= floor]
+        return (selected or sources[:1])[:4]
+
     def _refine_topic(self, classified: TopicResult, sources: list[Source]) -> TopicResult:
         topic_weights: dict[str, float] = {}
         for source in sources[:8]:
@@ -929,12 +1144,20 @@ class SupportAgent:
             return round(max(0.0, min(base, 0.96)), 3)
 
         if not grounded:
-            return 0.0
+            return 0.18 if sources else 0.0
         normalized_topic = max(0.0, min(float(topic_confidence), 1.0))
         best_source = max((max(0.0, min(float(source.score), 1.0)) for source in sources), default=0.0)
         if not sources:
             return round(normalized_topic * 0.6, 3)
-        return round((normalized_topic * 0.45) + (best_source * 0.55), 3)
+        actionability = self._source_actionability(sources)
+        agreement = self._source_agreement(sources, sources[0].topic if sources else None)
+        return round(
+            (normalized_topic * 0.28)
+            + (best_source * 0.42)
+            + (actionability * 0.18)
+            + (agreement * 0.12),
+            3,
+        )
 
     def _select_answer_sources(self, sources: list[Source], topic: str | None) -> list[Source]:
         if not sources:
