@@ -116,9 +116,7 @@ function App() {
   const selectedVoice = selectCzechVoice(ttsVoices);
   const samples = demoQuestions[agentMode];
   const frequentQuestions = useMemo(() => mergeFrequentQuestions(cacheStats?.top_frequent.map((item) => item.query) ?? [], samples), [cacheStats, samples]);
-  const latestActions = savedResponse?.next_actions ?? [];
   const latestEscalation = savedResponse?.escalation_packet ?? null;
-  const visibleActions = useMemo(() => latestActions.filter((action) => !isCopyEscalationAction(action)), [latestActions]);
 
   useEffect(() => {
     void refreshStats();
@@ -307,14 +305,6 @@ function App() {
     await forgetMemory(sessionId).catch(() => undefined);
   }
 
-  async function handleNextAction(action: string) {
-    if (action.toLowerCase().includes("kopirovat") && latestEscalation) {
-      await navigator.clipboard?.writeText(latestEscalation);
-      return;
-    }
-    setMessage(promptForAction(action, patientMemory));
-  }
-
   async function copyHistory() {
     const transcript = messages
       .map((item) => `${item.role === "user" ? "Uzivatel" : "Asistent"}: ${item.role === "assistant" ? stripSourceLines(item.content) : item.content}`)
@@ -339,10 +329,13 @@ function App() {
               <XdentLogo small />
               <div className="min-w-0">
                 <div className="truncate text-sm font-semibold">XDent AI Asistent</div>
-                <div className="truncate text-xs text-white/75">{isIndexed ? `${stats?.points_count ?? 0} chunku v indexu` : "Index neni pripraveny"}</div>
+                <div className="truncate text-xs text-white/75">Strucne odpovedi podle zdroju</div>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <span className="chunk-count-chip" title={isIndexed ? "Pocet pripravenych chunku v indexu" : "Index zatim neni pripraveny"}>
+                {isIndexed ? `${stats?.points_count ?? 0} chunku` : "0 chunku"}
+              </span>
               <button className="xdent-header-button" onClick={() => { void refreshStats(); void refreshCacheStats(); }} title="Obnovit stav">
                 <RefreshCw size={15} />
               </button>
@@ -375,16 +368,6 @@ function App() {
             <div className="mx-4 mb-3 flex gap-2 rounded-md border border-coral/30 bg-coral/10 p-3 text-sm text-coral">
               <AlertTriangle size={17} />
               <span>{error}</span>
-            </div>
-          )}
-
-          {visibleActions.length > 0 && (
-            <div className="xdent-chat-actions">
-              {visibleActions.map((action) => (
-                <button key={action} className="quick-action" type="button" onClick={() => { void handleNextAction(action); }}>
-                  {action}
-                </button>
-              ))}
             </div>
           )}
 
@@ -913,25 +896,6 @@ function placeholderForAgent(agentMode: AgentMode): string {
   if (agentMode === "scheduler") return "Napiste mesto, typ osetreni a telefon/e-mail pro potvrzeni...";
   if (agentMode === "handoff") return "Napiste, co ma recepce nebo podpora prevzit...";
   return "Napiste dotaz k programu XDENT...";
-}
-
-function promptForAction(action: string, memory: UserInfo | null): string {
-  const lowered = action.toLowerCase();
-  if (lowered.includes("telefon") || lowered.includes("kontakt")) return "Telefon/e-mail pacienta je: ";
-  if (lowered.includes("mesto")) return "Pacient je z mesta: ";
-  if (lowered.includes("popis") || lowered.includes("trapi")) return "Pacienta trapi: ";
-  if (lowered.includes("nejdrivejsi")) {
-    const city = memory?.patient_city ? ` v ${memory.patient_city}` : "";
-    return `Najdi nejdrivejsi termin${city}.`;
-  }
-  if (lowered.includes("screenshot")) return "Mam screenshot chyby. Chci pripravit eskalaci pro podporu.";
-  if (lowered.includes("2. urovni")) return "Predat 2. urovni podpory: ";
-  if (lowered.includes("zavolat")) return "Chci kontakt na nejvhodnejsi ordinaci pro akutni pripad.";
-  return action;
-}
-
-function isCopyEscalationAction(action: string): boolean {
-  return action.toLowerCase().includes("kopirovat") && action.toLowerCase().includes("eskalaci");
 }
 
 function mergeFrequentQuestions(frequent: string[], samples: string[]): string[] {
